@@ -1,3 +1,5 @@
 project/libs
 project/gen
 project/bin
+*.swp
+*~

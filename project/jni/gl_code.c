@@ -36,8 +36,8 @@ static void printGLString(const char *name, GLenum s) {
 }
 
 static void checkGlError(const char* op) {
-    for (GLint error = glGetError(); error; error
-            = glGetError()) {
+    GLint error;
+    for (error = glGetError(); error; error = glGetError()) {
         LOGI("after %s() glError (0x%x)\n", op, error);
     }
 }
@@ -136,7 +136,7 @@ double center_x = 1991418.0;
 double center_y = 8267328.0;
 int width, height;
 
-bool setupGraphics(int w, int h) {
+int setupGraphics(int w, int h) {
     printGLString("Version", GL_VERSION);
     printGLString("Vendor", GL_VENDOR);
     printGLString("Renderer", GL_RENDERER);
@@ -146,7 +146,7 @@ bool setupGraphics(int w, int h) {
     gProgram = createProgram(gVertexShader, gFragmentShader);
     if (!gProgram) {
         LOGE("Could not create program.");
-        return false;
+        return 1;
     }
     gcPositionHandle = glGetUniformLocation(gProgram, "cPosition");
     gScaleXHandle = glGetUniformLocation(gProgram, "scaleX");
@@ -161,7 +161,7 @@ bool setupGraphics(int w, int h) {
 
     glViewport(0, 0, w, h);
     checkGlError("glViewport");
-    return true;
+    return 0;
 }
 
 const GLfloat gTriangleVertices[] = { 0.0f, 0.5f, -0.5f, -0.5f,
@@ -184,7 +184,7 @@ void renderFrame() {
     //glLineWidth(4);
 
     glUniform4f(gcPositionHandle, xPos, yPos, 0.0, 0.0);
-    glUniform1f(gScaleXHandle, zPos*float(height)/float(width));
+    glUniform1f(gScaleXHandle, zPos*(float)(height)/(float)(width));
     glUniform1f(gScaleYHandle, zPos);
 
     glVertexAttribPointer(gvPositionHandle, 2, GL_FLOAT, GL_FALSE, 0, gSegmentVertices);
@@ -212,11 +212,9 @@ void renderFrame() {
     */
 }
 
-extern "C" {
-    JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj,  jint width, jint height);
-    JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobject obj);
-    JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobject obj, jdouble x, jdouble y, jdouble z);
-};
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj,  jint width, jint height);
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobject obj);
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobject obj, jdouble x, jdouble y, jdouble z);
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj,  jint width, jint height)
 {
@@ -235,6 +233,6 @@ JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobjec
     zPos = z;
     LOGI("GL: T[1].x = %f\n", (gSegmentVertices[2] - xPos));
     LOGI("GL: T[1].y = %f\n", (gSegmentVertices[3] - yPos));
-    LOGI("GL: T[1].X = %f\n", zPos*(float(height)/float(width))*(gSegmentVertices[2] - xPos));
+    LOGI("GL: T[1].X = %f\n", zPos*((float)(height)/(float)(width))*(gSegmentVertices[2] - xPos));
     LOGI("GL: T[1].Y = %f\n", zPos*(gSegmentVertices[3] - yPos));
 }
