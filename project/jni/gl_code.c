@@ -49,17 +49,24 @@ static const char gVertexShader[] =
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
     "attribute vec4 vPosition;\n"
+    "attribute vec4 texPosition;\n"
+    "varying vec2 gl_TexCoord;\n"
     "void main() {\n"
     "  vec4 a = vPosition; \n"
     "  a.x = scaleX*(a.x - cPosition.x);\n"
     "  a.y = scaleY*(a.y - cPosition.y);\n"
+    "  gl_TexCoord = texPosition.xy;\n"
     "  gl_Position = a;\n"
     "}\n";
 
 static const char gFragmentShader[] = 
     "precision mediump float;\n"
+    "uniform sampler2D tex;\n"
+    "varying vec2 gl_TexCoord;\n"
     "void main() {\n"
-    "  gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "  vec4 texel = texture2D(tex, gl_TexCoord);\n"
+    "  vec4 color = vec4(0.0, 0.0, 0.0, texel.a);\n"
+    "  gl_FragColor = color;\n"
     "}\n";
 
 GLuint loadShader(GLenum shaderType, const char* pSource) {
@@ -128,6 +135,7 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
 
 GLuint gProgram;
 GLuint gvPositionHandle;
+GLuint gtexPositionHandle;
 GLuint gcPositionHandle;
 GLuint gScaleXHandle;
 GLuint gScaleYHandle;
@@ -137,7 +145,7 @@ double zPos = 10.0;
 double center_x = 1991418.0;
 double center_y = 8267328.0;
 int width, height;
-float falloff = 0.05;
+float falloff = 0.5;
 
 typedef struct _Vec Vec;
 typedef struct _LineVertex LineVertex;
@@ -148,6 +156,9 @@ struct _Vec {
 struct _LineVertex {
     GLfloat x;
     GLfloat y;
+    GLfloat tx;
+    GLfloat ty;
+    GLuint rgba;
 };
 
 void unpackLinesToPolygons(int nrofLines, int *lengths, Vec *points, LineVertex *lineVertices, GLfloat width) {
@@ -170,14 +181,37 @@ void unpackLinesToPolygons(int nrofLines, int *lengths, Vec *points, LineVertex 
         u.x = -v.y; u.y = v.x;
 
         // Add the first point twice to be able to draw with GL_TRIANGLE_STRIP
-        lineVertices[ind].x = points[n].x + u.x*width;
-        lineVertices[ind].y = points[n].y + u.y*width;
+        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].ty = 1.0;
+        lineVertices[ind].rgba = 0; 
         ind++;
+        // For rounded line ends
+        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].ty = 1.0;
+        lineVertices[ind].rgba = 0; 
+        ind++;
+        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+        lineVertices[ind].tx = 1.0;
+        lineVertices[ind].ty = 1.0;
+        lineVertices[ind].rgba = 0; 
+        ind++;
+        // Start of line
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
+        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].rgba = 0; 
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
+        lineVertices[ind].tx = 1.0;
+        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].rgba = 0; 
         ind++;
         n++;
 
@@ -211,9 +245,15 @@ void unpackLinesToPolygons(int nrofLines, int *lengths, Vec *points, LineVertex 
 
             lineVertices[ind].x = points[n].x + u.x*width;
             lineVertices[ind].y = points[n].y + u.y*width;
+            lineVertices[ind].rgba = 0; 
+            lineVertices[ind].tx = 0.5;
+            lineVertices[ind].ty = 0.75;
             ind++;
             lineVertices[ind].x = points[n].x - u.x*width;
             lineVertices[ind].y = points[n].y - u.y*width;
+            lineVertices[ind].tx = 1.0;
+            lineVertices[ind].ty = 0.75;
+            lineVertices[ind].rgba = 0; 
             ind++;
             n++;
         }
@@ -226,13 +266,35 @@ void unpackLinesToPolygons(int nrofLines, int *lengths, Vec *points, LineVertex 
         u.x = v.y; u.y = -v.x;
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
+        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].rgba = 0; 
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
+        lineVertices[ind].tx = 1.0;
+        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].rgba = 0; 
+        ind++;
+        // For rounded line edges
+        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].rgba = 0; 
+        ind++;
+        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+        lineVertices[ind].tx = 1.0;
+        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].rgba = 0; 
         ind++;
         // Add the last vertex twice to be able to draw with GL_TRIANGLE_STRIP
-        lineVertices[ind].x = points[n].x - u.x*width;
-        lineVertices[ind].y = points[n].y - u.y*width;
+        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+        lineVertices[ind].tx = 1.0;
+        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].rgba = 0; 
         ind++;
         n++;
     }
@@ -267,15 +329,20 @@ int setupGraphics(int w, int h) {
     LOGI("glGetAttribLocation(\"vPosition\") = %d\n",
             gvPositionHandle);
 
+    gtexPositionHandle = glGetAttribLocation(gProgram, "texPosition");
+    checkGlError("glGetAttribLocation");
+    LOGI("glGetAttribLocation(\"texPosition\") = %d\n",
+            gtexPositionHandle);
+
     glViewport(0, 0, w, h);
     checkGlError("glViewport");
 
     glAATexInit();
-    glAAGenerateAATex(falloff, 0, 0.5f);					// 0.5 uses nearest mipmap filtering
+    glAAGenerateAATex(falloff, 0, 0.5f); // 0.5 uses nearest mipmap filtering
 
 
     // For each line, we get twice the number of points, plus one extra node in the beginning and end
-    gSegmentVertices = malloc((2*nrofLinePoints + 2*nrofLines) * sizeof(LineVertex));
+    gSegmentVertices = malloc((2*nrofLinePoints + 6*nrofLines) * sizeof(LineVertex));
     unpackLinesToPolygons(nrofLines, lineLengths, (Vec *)linePoints, gSegmentVertices, 10.0);
 
     return 0;
@@ -299,9 +366,12 @@ void renderFrame() {
     glUniform1f(gScaleXHandle, zPos*(float)(height)/(float)(width));
     glUniform1f(gScaleYHandle, zPos);
 
-    int nrofVertices = 2*nrofLinePoints + 2*nrofLines;
-    glVertexAttribPointer(gvPositionHandle, 2, GL_FLOAT, GL_FALSE, 0, gSegmentVertices);
+    int nrofVertices = 2*nrofLinePoints + 6*nrofLines;
+    glVertexAttribPointer(gvPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &gSegmentVertices[0].x);
     glEnableVertexAttribArray(gvPositionHandle);
+    glVertexAttribPointer(gtexPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &gSegmentVertices[0].tx);
+    glEnableVertexAttribArray(gtexPositionHandle);
+    glEnable(GL_TEXTURE_2D);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofVertices);
 
 }
