@@ -18,6 +18,7 @@ typedef struct _WayNode WayNode;
 typedef struct _Vec Vec;
 typedef struct _Way Way;
 typedef struct _TempRoutingWay TempRoutingWay;
+typedef struct _MapWay MapWay;
 
 struct _Vec {
     double x;
@@ -38,6 +39,13 @@ struct _Way {
     RoutingTagSet *tagset;
 };
 
+struct _MapWay {
+    int length;
+    float width;
+    unsigned char rgba[4];
+    RoutingTagSet *tagset;
+};
+
 struct _TempRoutingWay {
     int node_id;
     RoutingWay *way;
@@ -54,6 +62,56 @@ TAG used_highways[] = { highway_motorway, highway_motorway_link, highway_trunk,
     highway_services, highway_path, highway_cycleway, highway_footway,
     highway_bridleway, highway_byway, highway_steps };
 int nrof_used_highways = 23;
+double highway_widths[] = { 
+   20.0, // highway_motorway
+   16.0, // highway_motorway_link
+   16.0, // highway_trunk
+   16.0, // highway_trunk_link
+   14.0, // highway_primary
+   14.0, // highway_primary_link
+   12.0, // highway_secondary
+   12.0, // highway_secondary_link
+   10.0, // highway_tertiary
+   10.0, // highway_unclassified
+   10.0, // highway_road
+   8.0,  // highway_residential
+   8.0,  // highway_living_street
+   8.0,  // highway_service
+   6.0,  // highway_track
+   6.0,  // highway_pedestrian
+   6.0,  // highway_services
+   4.0,  // highway_path
+   6.0,  // highway_cycleway
+   6.0,  // highway_footway
+   6.0,  // highway_bridleway
+   6.0,  // highway_byway
+   6.0   // highway_steps 
+};
+unsigned char highway_colors[] = { 
+    136, 136, 136, 255, // highway_motorway
+    136, 136, 136, 255, // highway_motorway_link
+    136, 136, 136, 255, // highway_trunk
+    136, 136, 136, 255, // highway_trunk_link
+    136, 136, 136, 255, // highway_primary
+    136, 136, 136, 255, // highway_primary_link
+    136, 136, 136, 255, // highway_secondary
+    136, 136, 136, 255, // highway_secondary_link
+    136, 136, 136, 255, // highway_tertiary
+    136, 136, 136, 255, // highway_unclassified
+    136, 136, 136, 255, // highway_road
+    136, 136, 136, 255, // highway_residential
+    136, 136, 136, 255, // highway_living_street
+    136, 136, 136, 255, // highway_service
+    184, 166, 119, 255, // highway_track
+    145, 145, 145, 255, // highway_pedestrian
+    145, 145, 145, 255, // highway_services
+    184, 166, 119, 255, // highway_path
+    145, 145, 145, 255, // highway_cycleway
+    145, 145, 145, 255, // highway_footway
+    184, 166, 119, 255, // highway_bridleway
+    145, 145, 145, 255, // highway_byway
+    110, 110, 110, 255  // highway_steps 
+};
 
 /* Global variables */
 int depth;
@@ -61,7 +119,7 @@ int node_count;
 List *node_list;
 RoutingNode **nodes;
 List *way_list;
-List *lengths;
+List *mapways;
 Way way;
 int *tagsetindex;
 RoutingTagSet *tagsets;
@@ -279,7 +337,7 @@ int add_tagset_to_index(Way way) {
 
 void
 wayparser_end(void *data, const char *el) {
-    int i, index;
+    int i, j, index;
     WayNode *cn;
     RoutingNode *nd, *nn, *pn;
     Vec v, u, w, e;
@@ -291,18 +349,34 @@ wayparser_end(void *data, const char *el) {
             int tagset = add_tagset_to_index(way);
 
             float width = 10.0;
-            int* length = malloc(sizeof(int));
-            *length = 0;
+            MapWay* mapway = malloc(sizeof(MapWay));
+            mapway->length = 0;
+            mapway->width = 5.0;
+            mapway->rgba[0] = 0;
+            mapway->rgba[1] = 0;
+            mapway->rgba[2] = 0;
+            mapway->rgba[3] = 0;
+            for (i = 0; i < nrof_used_highways; i++) {
+                for (j = 0; j < way.tagset->size; j++) {
+                    if (used_highways[i] == way.tagset->tags[j]) {
+                        mapway->width = highway_widths[i];
+                        mapway->rgba[0] = highway_colors[4*i+0];
+                        mapway->rgba[1] = highway_colors[4*i+1];
+                        mapway->rgba[2] = highway_colors[4*i+2];
+                        mapway->rgba[3] = highway_colors[4*i+3];
+                    }
+                }
+            }
 
             // Calculate triangle corners for the given width
             for (cn = way.start; cn; cn = cn->next) {
                 // Get the node
                 nd = get_node(cn->id);
                 printf("%ff, %ff, ", scale*(nd->x - center_x), scale*(nd->y - center_y));
-                *length += 1;
+                mapway->length += 1;
             }
 
-            lengths = list_append(lengths, length);
+            mapways = list_append(mapways, mapway);
         }
 
         // Free the nodes
@@ -334,7 +408,7 @@ main(int argc, char **argv)
     List *cn, *l;
     RoutingWay *w;
     RoutingNode *nd;
-    lengths = NULL;
+    mapways = NULL;
 
     
     //printf("Whichway Create Index\n");
@@ -478,15 +552,29 @@ main(int argc, char **argv)
     }
 
     printf("\n");
-    l = lengths;
+    l = mapways;
     int nrof_segments = 0;
     int nrof_nodes = 0;
     while (l) {
-        int *length = l->data;
-        printf("%d, ", *length);
+        MapWay *mapway = l->data;
+        printf("%d, ", mapway->length);
         l = l->next;
-        nrof_nodes += *length;
+        nrof_nodes += mapway->length;
         nrof_segments++;
+    }
+    printf("\n");
+    l = mapways;
+    while (l) {
+        MapWay *mapway = l->data;
+        printf("%f, ", mapway->width);
+        l = l->next;
+    }
+    printf("\n");
+    l = mapways;
+    while (l) {
+        MapWay *mapway = l->data;
+        for (i = 0; i < 4; i++) printf("%u, ", mapway->rgba[i]);
+        l = l->next;
     }
     printf("\n");
     printf("%d\n", nrof_nodes);
