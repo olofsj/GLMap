@@ -9,6 +9,6 @@ INCLUDES = \
 bin_PROGRAMS = mapgenerator
 
 mapgenerator_SOURCES = mapgenerator.c mapgenerator_utils.c
-mapgenerator_LDADD = -lexpat -lproj 
+mapgenerator_LDADD = -lexpat -lproj -ltriangle
 mapgenerator_LDFLAGS =
 

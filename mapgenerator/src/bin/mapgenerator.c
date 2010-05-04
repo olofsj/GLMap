@@ -11,6 +11,7 @@
 #include <math.h>
 #include "mapgenerator.h"
 #include <proj_api.h>
+#include <triangle.h>
 
 #define BUFF_SIZE 1048576
 
@@ -19,6 +20,7 @@ typedef struct _Vec Vec;
 typedef struct _Way Way;
 typedef struct _TempRoutingWay TempRoutingWay;
 typedef struct _MapWay MapWay;
+typedef struct _MapPolygon MapPolygon;
 
 struct _Vec {
     double x;
@@ -43,6 +45,13 @@ struct _MapWay {
     int length;
     float width;
     unsigned char rgba[4];
+    RoutingTagSet *tagset;
+};
+
+struct _MapPolygon {
+    int size;
+    unsigned char rgba[4];
+    double *vertices;
     RoutingTagSet *tagset;
 };
 
@@ -113,6 +122,12 @@ unsigned char highway_colors[] = {
     110, 110, 110, 255  // highway_steps 
 };
 
+TAG used_polygons[] = { natural_cliff, natural_coastline, natural_fell, natural_glacier,
+    natural_heath, natural_land, natural_marsh, natural_mud, 
+    natural_sand, natural_scree, natural_scrub, 
+    natural_water, natural_wetland, natural_wood };
+int nrof_used_polygons = 14;
+
 /* Global variables */
 int depth;
 int node_count;
@@ -120,6 +135,7 @@ List *node_list;
 RoutingNode **nodes;
 List *way_list;
 List *mapways;
+List *polygons;
 Way way;
 int *tagsetindex;
 RoutingTagSet *tagsets;
@@ -298,6 +314,19 @@ int way_type_is_used(Way way) {
     return 0;
 }
 
+int polygon_type_is_used(Way way) {
+    int i,j;
+
+    for (i = 0; i < nrof_used_polygons; i++) {
+        for (j = 0; j < way.tagset->size; j++) {
+            if (used_polygons[i] == way.tagset->tags[j])
+                return 1;
+        }
+    }
+    
+    return 0;
+}
+
 int add_tagset_to_index(Way way) {
     int i, j, k;
     
@@ -378,6 +407,45 @@ wayparser_end(void *data, const char *el) {
 
             mapways = list_append(mapways, mapway);
         }
+        else if (polygon_type_is_used(way)) {
+            // Call Triangle to tesselate the polygon
+            struct triangulateio trin, trout;
+            trin.pointlist = malloc(2 * way.size * sizeof(double));
+            trin.numberofpoints = way.size;
+            trin.numberofpointattributes = 0;
+            trin.pointattributelist = NULL;
+            trin.pointmarkerlist = NULL;
+            for (cn = way.start, i = 0; cn; cn = cn->next, i++) {
+                nd = get_node(cn->id);
+                trin.pointlist[2*i]   = scale*(nd->x - center_x);
+                trin.pointlist[2*i+1] = scale*(nd->y - center_y);
+            }
+
+            trout.pointlist = NULL;
+            trout.pointmarkerlist = NULL;
+            trout.trianglelist = NULL;
+
+            //triangulate("-zVE", &trin, &trout, NULL);
+            triangulate("-zQ", &trin, &trout, NULL);
+
+            MapPolygon *polygon = malloc(sizeof(MapPolygon));
+            polygon->size = trout.numberoftriangles;
+            polygon->vertices = malloc(3 * trout.numberoftriangles * sizeof(double));
+            for (i = 0; i < trout.numberoftriangles; i++) {
+                //printf("i = %d / %d\n", i, trout.numberoftriangles);
+                //printf("t = %lf\n", trout.trianglelist[i * 3]);
+                polygon->vertices[i * 3] = trout.pointlist[trout.trianglelist[i * 3]];
+                polygon->vertices[i * 3 + 1] = trout.pointlist[trout.trianglelist[i * 3 + 1]];
+                polygon->vertices[i * 3 + 2] = trout.pointlist[trout.trianglelist[i * 3 + 2]];
+            }
+            polygons = list_append(polygons, polygon);
+
+
+            trifree(trout.pointlist);
+            trifree(trout.pointmarkerlist);
+            trifree(trout.trianglelist);
+            free(trin.pointlist);
+        }
 
         // Free the nodes
         free(way.tagset);
@@ -409,6 +477,7 @@ main(int argc, char **argv)
     RoutingWay *w;
     RoutingNode *nd;
     mapways = NULL;
+    polygons = NULL;
 
     
     //printf("Whichway Create Index\n");
@@ -577,8 +646,20 @@ main(int argc, char **argv)
         l = l->next;
     }
     printf("\n");
-    printf("%d\n", nrof_nodes);
-    printf("%d\n", nrof_segments);
+    printf("nrof_nodes = %d;\n", nrof_nodes);
+    printf("nrof_segments = %d;\n", nrof_segments);
+
+    l = polygons;
+    int nrof_vertices = 0;
+    while (l) {
+        MapPolygon *polygon = l->data;
+        nrof_vertices += polygon->size;
+        for (i = 0; i < polygon->size; i++) 
+            printf("%f, %f, %f, ", polygon->vertices[3*i], polygon->vertices[3*i+1], polygon->vertices[3*i+2]);
+        l = l->next;
+    }
+    printf("\n");
+    printf("nrof_vertices = %d;\n", nrof_vertices);
 
 }
 

@@ -28,10 +28,23 @@ typedef enum { highway_motorway, highway_motorway_link, highway_trunk,
     traffic_calming_hump, traffic_calming_rumble_strip, traffic_calming_table,
     traffic_calming_choker, smoothness_excellent, smoothness_good,
     smoothness_intermediate, smoothness_bad, smoothness_very_bad,
-    smoothness_horrible, smoothness_very_horrible, smoothness_impassable } TAG;
-#define TAG_KEYS { "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness" }
-#define TAG_VALUES { "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "unclassified", "road", "residential", "living_street", "service", "track", "pedestrian", "raceway", "services", "bus_guideway", "path", "cycleway", "footway", "bridleway", "byway", "steps", "mini_roundabout", "stop", "traffic_signals", "crossing", "motorway_junction", "incline", "incline_steep", "ford", "bus_stop", "turning_circle", "construction", "proposed", "emergency_access_point", "speed_camera", "yes", "bump", "chicane", "cushion", "hump", "rumble_strip", "table", "choker", "excellent", "good", "intermediate", "bad", "very_bad", "horrible", "very_horrible", "impassable" }
-#define NROF_TAGS 55
+    smoothness_horrible, smoothness_very_horrible, smoothness_impassable,
+    landuse_allotments, landuse_basin, landuse_brownfield, landuse_cemetery,
+    landuse_commercial, landuse_construction, landuse_farm, landuse_farmland,
+    landuse_farmyard, landuse_forest, landuse_garages, landuse_grass,
+    landuse_greenfield, landuse_greenhouse_horticulture, landuse_industrial,
+    landuse_landfill, landuse_meadow, landuse_military, landuse_orchard,
+    landuse_quarry, landuse_railway, landuse_recreation_ground, landuse_reservoir,
+    landuse_residential, landuse_retail, landuse_salt_pond, landuse_village_green,
+    landuse_vineyard, natural_bay, natural_beach, natural_cave_entrance,
+    natural_cliff, natural_coastline, natural_fell, natural_glacier,
+    natural_heath, natural_land, natural_marsh, natural_mud, natural_peak,
+    natural_sand, natural_scree, natural_scrub, natural_spring, natural_stone,
+    natural_tree, natural_volcano, natural_water, natural_wetland, natural_wood
+} TAG;
+#define TAG_KEYS { "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "highway", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "traffic_calming", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "smoothness", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "landuse", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural", "natural" }
+#define TAG_VALUES { "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "unclassified", "road", "residential", "living_street", "service", "track", "pedestrian", "raceway", "services", "bus_guideway", "path", "cycleway", "footway", "bridleway", "byway", "steps", "mini_roundabout", "stop", "traffic_signals", "crossing", "motorway_junction", "incline", "incline_steep", "ford", "bus_stop", "turning_circle", "construction", "proposed", "emergency_access_point", "speed_camera", "yes", "bump", "chicane", "cushion", "hump", "rumble_strip", "table", "choker", "excellent", "good", "intermediate", "bad", "very_bad", "horrible", "very_horrible", "impassable", "allotments", "basin", "brownfield", "cemetery", "commercial", "construction", "farm", "farmland", "farmyard", "forest", "garages", "grass", "greenfield", "greenhouse_horticulture", "industrial", "landfill", "meadow", "military", "orchard", "quarry", "railway", "recreation_ground", "reservoir", "residential", "retail", "salt_pond", "village_green", "vineyard", "bay", "beach", "cave_entrance", "cliff", "coastline", "fell", "glacier", "heath", "land", "marsh", "mud", "peak", "sand", "scree", "scrub", "spring", "stone", "tree", "volcano", "water", "wetland", "wood" }
+#define NROF_TAGS 105
 
 
 struct _RoutingNode {
