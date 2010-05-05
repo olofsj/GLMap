@@ -122,11 +122,11 @@ unsigned char highway_colors[] = {
     110, 110, 110, 255  // highway_steps 
 };
 
-TAG used_polygons[] = { natural_cliff, natural_coastline, natural_fell, natural_glacier,
+TAG used_polygons[] = { natural_cliff, natural_fell, natural_glacier,
     natural_heath, natural_land, natural_marsh, natural_mud, 
     natural_sand, natural_scree, natural_scrub, 
     natural_water, natural_wetland, natural_wood };
-int nrof_used_polygons = 14;
+int nrof_used_polygons = 13;
 
 /* Global variables */
 int depth;
@@ -410,41 +410,67 @@ wayparser_end(void *data, const char *el) {
         else if (polygon_type_is_used(way)) {
             // Call Triangle to tesselate the polygon
             struct triangulateio trin, trout;
-            trin.pointlist = malloc(2 * way.size * sizeof(double));
-            trin.numberofpoints = way.size;
+            int size = way.size - 1; // Last point is repeat of first
+            trin.pointlist = malloc(2 * size * sizeof(double));
+            trin.numberofpoints = size;
             trin.numberofpointattributes = 0;
             trin.pointattributelist = NULL;
             trin.pointmarkerlist = NULL;
-            for (cn = way.start, i = 0; cn; cn = cn->next, i++) {
+            trin.segmentlist = malloc(2 * size * sizeof(int));
+            trin.numberofsegments = size;
+            trin.segmentmarkerlist = NULL;
+            trin.numberofholes = 0;
+            trin.numberofregions = 0;
+            printf("\nid = %d\n", way.start->id);
+            for (cn = way.start, i = 0; i < size; cn = cn->next, i++) {
                 nd = get_node(cn->id);
                 trin.pointlist[2*i]   = scale*(nd->x - center_x);
                 trin.pointlist[2*i+1] = scale*(nd->y - center_y);
+                trin.segmentlist[2*i] = i;
+                trin.segmentlist[2*i+1] = (i+1) % size;
             }
-
             trout.pointlist = NULL;
+            trout.segmentlist = NULL;
+            trout.segmentmarkerlist = NULL;
             trout.pointmarkerlist = NULL;
             trout.trianglelist = NULL;
+            //trout.holelist = NULL;
+            //trout.regionlist = NULL;
+            //trout.edgelist = NULL;
+            //trout.edgemarkerlist = NULL;
+
+            //trout.pointattributelist = NULL;
+            //trout.triangleattributelist = NULL;
+            //trout.trianglearealist = NULL;
+            //trout.neighborlist = NULL;
+            //trout.normlist = NULL;
 
             //triangulate("-zVE", &trin, &trout, NULL);
-            triangulate("-zQ", &trin, &trout, NULL);
+            triangulate("-zpqQ", &trin, &trout, NULL);
 
             MapPolygon *polygon = malloc(sizeof(MapPolygon));
             polygon->size = trout.numberoftriangles;
-            polygon->vertices = malloc(3 * trout.numberoftriangles * sizeof(double));
+            polygon->vertices = malloc(6 * trout.numberoftriangles * sizeof(double));
             for (i = 0; i < trout.numberoftriangles; i++) {
                 //printf("i = %d / %d\n", i, trout.numberoftriangles);
                 //printf("t = %lf\n", trout.trianglelist[i * 3]);
-                polygon->vertices[i * 3] = trout.pointlist[trout.trianglelist[i * 3]];
-                polygon->vertices[i * 3 + 1] = trout.pointlist[trout.trianglelist[i * 3 + 1]];
-                polygon->vertices[i * 3 + 2] = trout.pointlist[trout.trianglelist[i * 3 + 2]];
+                polygon->vertices[i * 6] = trout.pointlist[2*trout.trianglelist[i * 3]];
+                polygon->vertices[i * 6 + 1] = trout.pointlist[2*trout.trianglelist[i * 3]+1];
+                polygon->vertices[i * 6 + 2] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]];
+                polygon->vertices[i * 6 + 3] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]+1];
+                polygon->vertices[i * 6 + 4] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]];
+                polygon->vertices[i * 6 + 5] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]+1];
             }
             polygons = list_append(polygons, polygon);
 
 
             trifree(trout.pointlist);
+            trifree(trout.segmentlist);
+            trifree(trout.segmentmarkerlist);
             trifree(trout.pointmarkerlist);
             trifree(trout.trianglelist);
             free(trin.pointlist);
+            free(trin.segmentlist);
         }
 
         // Free the nodes
@@ -654,8 +680,11 @@ main(int argc, char **argv)
     while (l) {
         MapPolygon *polygon = l->data;
         nrof_vertices += polygon->size;
-        for (i = 0; i < polygon->size; i++) 
-            printf("%f, %f, %f, ", polygon->vertices[3*i], polygon->vertices[3*i+1], polygon->vertices[3*i+2]);
+        for (i = 0; i < polygon->size; i++) {
+            printf("%f, %f, ", polygon->vertices[6*i], polygon->vertices[6*i+1]);
+            printf("%f, %f, ", polygon->vertices[6*i+2], polygon->vertices[6*i+3]);
+            printf("%f, %f, ", polygon->vertices[6*i+4], polygon->vertices[6*i+5]);
+        }
         l = l->next;
     }
     printf("\n");
