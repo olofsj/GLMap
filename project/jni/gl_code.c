@@ -177,7 +177,7 @@ double zPos = 10.0;
 double center_x = 1991418.0;
 double center_y = 8267328.0;
 int width, height;
-float falloff = 0.5;
+float falloff = 0.0;
 
 typedef struct _Vec Vec;
 typedef struct _LineVertex LineVertex;
@@ -404,9 +404,11 @@ int setupGraphics(int w, int h) {
             gPolygoncolorHandle);
             */
 
+    // Set up viewport
     glViewport(0, 0, w, h);
     checkGlError("glViewport");
 
+    // Set up texture to use for rendering lines and line endings
     glAATexInit();
     glAAGenerateAATex(falloff, 0, 0.5f); // 0.5 uses nearest mipmap filtering
 
@@ -422,11 +424,15 @@ void renderFrame() {
     glClearColor(0.98039, 0.96078, 0.91373, 1.0);
 
     checkGlError("glClearColor");
-    glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
     checkGlError("glClear");
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
 
     // Draw polygons
     glUseProgram(gPolygonProgram);

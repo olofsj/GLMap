@@ -196,6 +196,8 @@ class GLMapView extends GLSurfaceView {
             EGL10.EGL_RED_SIZE, 4,
             EGL10.EGL_GREEN_SIZE, 4,
             EGL10.EGL_BLUE_SIZE, 4,
+            EGL10.EGL_SAMPLE_BUFFERS, 1,
+            EGL10.EGL_SAMPLES, 4,
             EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
             EGL10.EGL_NONE
         };
@@ -236,6 +238,14 @@ class GLMapView extends GLSurfaceView {
 
                 // We need at least mDepthSize and mStencilSize bits
                 if (d < mDepthSize || s < mStencilSize)
+                    continue;
+
+                // Multisampling
+                int samplebuffers = findConfigAttrib(egl, display, config,
+                        EGL10.EGL_SAMPLE_BUFFERS, 0);
+                int samples = findConfigAttrib(egl, display, config,
+                        EGL10.EGL_SAMPLES, 0);
+                if (samplebuffers < 1 || samples < 4)
                     continue;
 
                 // We want an *exact* match for red/green/blue/alpha
@@ -376,7 +386,7 @@ class GLMapView extends GLSurfaceView {
         //private float zPos = 10.0f;
         private double xPos = 1991418.0;
         private double yPos = 8267328.0;
-        private double zPos = 0.01f;
+        private double zPos = 0.001f;
 
         public void onDrawFrame(GL10 gl) {
             GLMapLib.step();
