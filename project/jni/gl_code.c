@@ -371,22 +371,17 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
 
 int nrofLinePoints = 0;
 int nrofLines = 0;
-LineVertex *gSegmentVertices;
+LineVertex *lineVertices = NULL;
 
-PolygonVertex *polygonVertices;
 int nrofPolygons = 0;
 int nrofPolygonTriangles = 0;
+PolygonVertex *polygonVertices = NULL;
 
-
-int setupGraphics(int w, int h) {
+int init() {
     printGLString("Version", GL_VERSION);
     printGLString("Vendor", GL_VENDOR);
     printGLString("Renderer", GL_RENDERER);
     printGLString("Extensions", GL_EXTENSIONS);
-
-    LOGI("setupGraphics(%d, %d)", w, h);
-    width = w;
-    height = h;
 
     // Set up the program for rendering lines
     gLineProgram = createProgram(gLineVertexShader, gLineFragmentShader);
@@ -432,10 +427,6 @@ int setupGraphics(int w, int h) {
     checkGlError("glGetAttribLocation");
     LOGI("glGetAttribLocation(\"color\") = %d\n", gPolygoncolorHandle);
 
-    // Set up viewport
-    glViewport(0, 0, w, h);
-    checkGlError("glViewport");
-
     // Set up texture to use for rendering lines and line endings
     glAATexInit();
     glAAGenerateAATex(falloff, 0, 0.5f); // 0.5 uses nearest mipmap filtering
@@ -462,8 +453,8 @@ int setupGraphics(int w, int h) {
 
     // For each line, we get twice the number of points, plus one extra node in the beginning and end
     LOGI("Parsing map line data.\n");
-    gSegmentVertices = malloc((2*nrofLinePoints + 6*nrofLines) * sizeof(LineVertex));
-    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, gSegmentVertices);
+    lineVertices = malloc((2*nrofLinePoints + 6*nrofLines) * sizeof(LineVertex));
+    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices);
     LOGI("Finished parsing.\n");
 
     free(lineData);
@@ -492,7 +483,19 @@ int setupGraphics(int w, int h) {
 
     free(polygonData);
     free(vertices);
-    
+
+    return 0;
+}
+
+int setWindowSize(int w, int h) {
+    LOGI("setWindowSize(%d, %d)", w, h);
+    width = w;
+    height = h;
+
+    // Set up viewport
+    glViewport(0, 0, w, h);
+    checkGlError("glViewport");
+
     return 0;
 }
 
@@ -533,23 +536,29 @@ void renderFrame() {
     glUniform1f(gLineScaleYHandle, zPos);
 
     int nrofVertices = 2*nrofLinePoints + 6*nrofLines;
-    glVertexAttribPointer(gLinevPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &gSegmentVertices[0].x);
+    glVertexAttribPointer(gLinevPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &lineVertices[0].x);
     glEnableVertexAttribArray(gLinevPositionHandle);
-    glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &gSegmentVertices[0].tx);
+    glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &lineVertices[0].tx);
     glEnableVertexAttribArray(gLinetexPositionHandle);
-    glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(LineVertex), &gSegmentVertices[0].rgba);
+    glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(LineVertex), &lineVertices[0].rgba);
     glEnableVertexAttribArray(gLinecolorHandle);
     glEnable(GL_TEXTURE_2D);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofVertices);
 }
 
-JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj,  jint width, jint height);
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj);
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_setWindowSize(JNIEnv * env, jobject obj,  jint width, jint height);
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobject obj);
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobject obj, jdouble x, jdouble y, jdouble z);
 
-JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj,  jint width, jint height)
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj)
 {
-    setupGraphics(width, height);
+    init();
+}
+
+JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_setWindowSize(JNIEnv * env, jobject obj,  jint width, jint height)
+{
+    setWindowSize(width, height);
 }
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobject obj)

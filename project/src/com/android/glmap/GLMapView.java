@@ -379,8 +379,8 @@ class GLMapView extends GLSurfaceView {
     }
 
     private static class Renderer implements GLSurfaceView.Renderer {
-        private int width;
-        private int height;
+        private int width = 0;
+        private int height = 0;
         //private float xPos = 59.4f;
         //private float yPos = 17.87f;
         //private float zPos = 10.0f;
@@ -395,12 +395,13 @@ class GLMapView extends GLSurfaceView {
         public void onSurfaceChanged(GL10 gl, int width, int height) {
             this.width = width;
             this.height = height;
-            GLMapLib.init(width, height);
+            GLMapLib.setWindowSize(width, height);
             GLMapLib.move(this.xPos, this.yPos, this.zPos);
         }
 
         public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-            // Do nothing.
+            GLMapLib.init();
+            GLMapLib.setWindowSize(width, height);
         }
 
         public void move(float x, float y) {
