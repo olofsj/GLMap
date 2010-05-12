@@ -45,13 +45,14 @@ struct _MapWay {
     int length;
     float width;
     unsigned char rgba[4];
+    float *vertices;
     RoutingTagSet *tagset;
 };
 
 struct _MapPolygon {
     int size;
     unsigned char rgba[4];
-    double *vertices;
+    float *vertices;
     RoutingTagSet *tagset;
 };
 
@@ -122,11 +123,24 @@ unsigned char highway_colors[] = {
     110, 110, 110, 255  // highway_steps 
 };
 
-TAG used_polygons[] = { natural_cliff, natural_fell, natural_glacier,
-    natural_heath, natural_land, natural_marsh, natural_mud, 
-    natural_sand, natural_scree, natural_scrub, 
-    natural_water, natural_wetland, natural_wood };
-int nrof_used_polygons = 13;
+TAG used_polygons[] = { natural_land, natural_water, natural_wetland, natural_wood,
+    landuse_farm, landuse_farmland, landuse_farmyard, landuse_forest, 
+    landuse_meadow, landuse_orchard, landuse_village_green, landuse_vineyard  };
+int nrof_used_polygons = 12;
+unsigned char polygon_colors[] = { 
+  250, 245, 233, 255, // natural_land
+  180, 203, 220, 255, // natural_water
+  180, 203, 220, 255, // natural_wetland
+  181, 201, 135, 255, // natural_wood 
+  250, 240, 213, 255, // landuse_farm
+  250, 240, 213, 255, // landuse_farmland
+  250, 240, 213, 255, // landuse_farmyard
+  181, 201, 135, 255, // landuse_forest
+  200, 216, 162, 255, // landuse_meadow
+  200, 216, 162, 255, // landuse_orchard
+  200, 216, 162, 255, // landuse_village_green
+  200, 216, 162, 255 // landuse_vineyard 
+};
 
 /* Global variables */
 int depth;
@@ -397,17 +411,21 @@ wayparser_end(void *data, const char *el) {
                 }
             }
 
-            // Calculate triangle corners for the given width
+            mapway->length = 0;
+            for (cn = way.start; cn; cn = cn->next)
+                mapway->length += 1;
+            mapway->vertices = malloc(mapway->length * 2 * sizeof(float));
+            i = 0;
             for (cn = way.start; cn; cn = cn->next) {
                 // Get the node
                 nd = get_node(cn->id);
-                printf("%ff, %ff, ", scale*(nd->x - center_x), scale*(nd->y - center_y));
-                mapway->length += 1;
+                mapway->vertices[i++] = scale*(nd->x - center_x);
+                mapway->vertices[i++] = scale*(nd->y - center_y);
             }
 
             mapways = list_append(mapways, mapway);
         }
-        else if (polygon_type_is_used(way)) {
+        else if (polygon_type_is_used(way) && way.size > 2) {
             // Call Triangle to tesselate the polygon
             struct triangulateio trin, trout;
             int size = way.size - 1; // Last point is repeat of first
@@ -421,7 +439,6 @@ wayparser_end(void *data, const char *el) {
             trin.segmentmarkerlist = NULL;
             trin.numberofholes = 0;
             trin.numberofregions = 0;
-            printf("\nid = %d\n", way.start->id);
             for (cn = way.start, i = 0; i < size; cn = cn->next, i++) {
                 nd = get_node(cn->id);
                 trin.pointlist[2*i]   = scale*(nd->x - center_x);
@@ -450,7 +467,7 @@ wayparser_end(void *data, const char *el) {
 
             MapPolygon *polygon = malloc(sizeof(MapPolygon));
             polygon->size = trout.numberoftriangles;
-            polygon->vertices = malloc(6 * trout.numberoftriangles * sizeof(double));
+            polygon->vertices = malloc(6 * trout.numberoftriangles * sizeof(float));
             for (i = 0; i < trout.numberoftriangles; i++) {
                 //printf("i = %d / %d\n", i, trout.numberoftriangles);
                 //printf("t = %lf\n", trout.trianglelist[i * 3]);
@@ -460,6 +477,20 @@ wayparser_end(void *data, const char *el) {
                 polygon->vertices[i * 6 + 3] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]+1];
                 polygon->vertices[i * 6 + 4] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]];
                 polygon->vertices[i * 6 + 5] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]+1];
+            }
+            polygon->rgba[0] = 0;
+            polygon->rgba[1] = 0;
+            polygon->rgba[2] = 0;
+            polygon->rgba[3] = 0;
+            for (i = 0; i < nrof_used_polygons; i++) {
+                for (j = 0; j < way.tagset->size; j++) {
+                    if (used_polygons[i] == way.tagset->tags[j]) {
+                        polygon->rgba[0] = polygon_colors[4*i+0];
+                        polygon->rgba[1] = polygon_colors[4*i+1];
+                        polygon->rgba[2] = polygon_colors[4*i+2];
+                        polygon->rgba[3] = polygon_colors[4*i+3];
+                    }
+                }
             }
             polygons = list_append(polygons, polygon);
 
@@ -646,49 +677,68 @@ main(int argc, char **argv)
             break;
     }
 
-    printf("\n");
+    // Calculate array sizes
     l = mapways;
-    int nrof_segments = 0;
+    int nrof_lines = 0;
     int nrof_nodes = 0;
     while (l) {
         MapWay *mapway = l->data;
-        printf("%d, ", mapway->length);
         l = l->next;
         nrof_nodes += mapway->length;
-        nrof_segments++;
+        nrof_lines++;
     }
-    printf("\n");
-    l = mapways;
-    while (l) {
-        MapWay *mapway = l->data;
-        printf("%f, ", mapway->width);
-        l = l->next;
-    }
-    printf("\n");
-    l = mapways;
-    while (l) {
-        MapWay *mapway = l->data;
-        for (i = 0; i < 4; i++) printf("%u, ", mapway->rgba[i]);
-        l = l->next;
-    }
-    printf("\n");
-    printf("nrof_nodes = %d;\n", nrof_nodes);
-    printf("nrof_segments = %d;\n", nrof_segments);
 
     l = polygons;
     int nrof_vertices = 0;
+    int nrof_polygons = 0;
     while (l) {
         MapPolygon *polygon = l->data;
         nrof_vertices += polygon->size;
-        for (i = 0; i < polygon->size; i++) {
-            printf("%f, %f, ", polygon->vertices[6*i], polygon->vertices[6*i+1]);
-            printf("%f, %f, ", polygon->vertices[6*i+2], polygon->vertices[6*i+3]);
-            printf("%f, %f, ", polygon->vertices[6*i+4], polygon->vertices[6*i+5]);
-        }
+        nrof_polygons++;
         l = l->next;
     }
-    printf("\n");
-    printf("nrof_vertices = %d;\n", nrof_vertices);
 
+    // Write to output files
+    FILE *fp;
+
+    // Write lines
+    fp = fopen("lines.map", "w");
+    if (!fp) {
+        fprintf(stderr, "Can't open output file for writing.\n");
+        exit(-1);
+    }
+    fwrite(&nrof_lines, sizeof(int), 1, fp);
+    fwrite(&nrof_nodes, sizeof(int), 1, fp);
+    for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
+        MapWay *mapway = l->data;
+        fwrite(&(mapway->length), sizeof(int), 1, fp);
+        fwrite(&(mapway->width), sizeof(float), 1, fp);
+        fwrite(&(mapway->rgba), sizeof(unsigned char), 4, fp);
+    }
+    for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
+        MapWay *mapway = l->data;
+        fwrite(mapway->vertices, sizeof(float), 2*mapway->length, fp);
+    }
+    fclose(fp);
+
+
+    // Write polygons
+    fp = fopen("polygons.map", "w");
+    if (!fp) {
+        fprintf(stderr, "Can't open output file for writing.\n");
+        exit(-1);
+    }
+    fwrite(&nrof_polygons, sizeof(int), 1, fp);
+    fwrite(&nrof_vertices, sizeof(int), 1, fp);
+    for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
+        MapPolygon *polygon = l->data;
+        fwrite(&(polygon->size), sizeof(int), 1, fp);
+        fwrite(&(polygon->rgba), sizeof(unsigned char), 4, fp);
+    }
+    for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
+        MapPolygon *polygon = l->data;
+        fwrite(polygon->vertices, sizeof(float), 6*polygon->size, fp);
+    }
+    fclose(fp);
 }
 
