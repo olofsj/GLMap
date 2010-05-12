@@ -463,7 +463,7 @@ wayparser_end(void *data, const char *el) {
             //trout.normlist = NULL;
 
             //triangulate("-zVE", &trin, &trout, NULL);
-            triangulate("-zpqQ", &trin, &trout, NULL);
+            triangulate("-zpQ", &trin, &trout, NULL);
 
             MapPolygon *polygon = malloc(sizeof(MapPolygon));
             polygon->size = trout.numberoftriangles;
@@ -526,7 +526,7 @@ main(int argc, char **argv)
     File osmfile;
     FILE *osmfilepointer;
     struct stat st;
-    char *filename, *outfilename;
+    char *filename;
     int i, j;
     int done;
     int len;
@@ -537,13 +537,12 @@ main(int argc, char **argv)
     polygons = NULL;
 
     
-    //printf("Whichway Create Index\n");
+    printf("Mapgenerator\n");
 
-    if (argc > 2) {
+    if (argc > 1) {
         filename = argv[1];
-        outfilename = argv[2];
     } else {
-        //printf("Input and output files must be specified.\n");
+        printf("Input file must be specified.\n");
         return 0;
     }
 
@@ -578,7 +577,7 @@ main(int argc, char **argv)
         exit(-1);
     }
 
-    //printf("filesize: %d\n", osmfile.size);
+    printf("filesize: %d\n", osmfile.size);
 
 
     // Set up an XML parser for the nodes
@@ -595,7 +594,7 @@ main(int argc, char **argv)
     node_list = NULL;
 
     /* Parse the XML document */
-    //printf("Parsing nodes from XML file...\n");
+    printf("Parsing nodes from XML file...\n");
     for (;;) {
         int bytes_read;
         void *buff = XML_GetBuffer(nodeparser, BUFF_SIZE);
@@ -622,7 +621,7 @@ main(int argc, char **argv)
 
 
     // Create an indexed sorted list of nodes
-    //printf("Sorting list of nodes...\n");
+    printf("Sorting list of nodes...\n");
     node_list = list_sort(node_list, node_sort_cb);
     
     nodes = malloc(node_count * sizeof(RoutingNode *));
@@ -651,7 +650,7 @@ main(int argc, char **argv)
     nrof_tagsets = 0;
 
     /* Parse the XML document */
-    //printf("Parsing ways from XML file...\n");
+    printf("Parsing ways from XML file...\n");
     fseek(osmfilepointer, 0, SEEK_SET);
     for (;;) {
         int bytes_read;
@@ -702,6 +701,7 @@ main(int argc, char **argv)
     FILE *fp;
 
     // Write lines
+    printf("Writing output (lines.map)...\n");
     fp = fopen("lines.map", "w");
     if (!fp) {
         fprintf(stderr, "Can't open output file for writing.\n");
@@ -723,6 +723,7 @@ main(int argc, char **argv)
 
 
     // Write polygons
+    printf("Writing output (polygons.map)...\n");
     fp = fopen("polygons.map", "w");
     if (!fp) {
         fprintf(stderr, "Can't open output file for writing.\n");

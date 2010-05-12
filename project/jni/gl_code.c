@@ -32,6 +32,8 @@
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
 #define  LOGE(...)  __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
 
+#define BUFFER_OFFSET(i) ((char *)NULL + (i))
+
 static void printGLString(const char *name, GLenum s) {
     const char *v = (const char *) glGetString(s);
     LOGI("GL %s = %s\n", name, v);
@@ -369,13 +371,13 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
     }
 }
 
-int nrofLinePoints = 0;
+int nrofLineVertices = 0;
 int nrofLines = 0;
-LineVertex *lineVertices = NULL;
+GLuint lineVBO;
 
 int nrofPolygons = 0;
 int nrofPolygonTriangles = 0;
-PolygonVertex *polygonVertices = NULL;
+GLuint polygonVBO;
 
 int init() {
     printGLString("Version", GL_VERSION);
@@ -431,6 +433,12 @@ int init() {
     glAATexInit();
     glAAGenerateAATex(falloff, 0, 0.5f); // 0.5 uses nearest mipmap filtering
 
+    // Set up vertex buffer objects 
+    GLuint vboIds[2];
+    glGenBuffers(2, vboIds);
+    lineVBO = vboIds[0];
+    polygonVBO = vboIds[1];
+
     // Load map data from files
     FILE *fp;
     int bytes_read;
@@ -438,12 +446,14 @@ int init() {
     // FIXME: Check that file exists etc.
     LOGI("Reading map line data from file.\n");
     fp = fopen("/sdcard/GLMap/lines.map", "r");
+    int nrofLinePoints;
     bytes_read = fread(&nrofLines, sizeof(int), 1, fp);
     bytes_read = fread(&nrofLinePoints, sizeof(int), 1, fp);
     LOGI("Found: %d lines, %d vertices.\n", nrofLines, nrofLinePoints);
 
     LineDataFormat *lineData;
     GLfloat *linePoints;
+    LineVertex *lineVertices = NULL;
     lineData = malloc(nrofLines * sizeof(LineDataFormat));
     linePoints = malloc(nrofLinePoints * sizeof(GLfloat));
     bytes_read = fread(lineData, sizeof(LineDataFormat), nrofLines, fp);
@@ -453,10 +463,17 @@ int init() {
 
     // For each line, we get twice the number of points, plus one extra node in the beginning and end
     LOGI("Parsing map line data.\n");
-    lineVertices = malloc((2*nrofLinePoints + 6*nrofLines) * sizeof(LineVertex));
+    nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
+    lineVertices = malloc(nrofLineVertices * sizeof(LineVertex));
     unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices);
     LOGI("Finished parsing.\n");
 
+    // Upload data to graphics core vertex buffer object
+    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+    glBufferData(GL_ARRAY_BUFFER, nrofLineVertices * sizeof(LineVertex),
+            lineVertices, GL_STATIC_DRAW);
+
+    free(lineVertices);
     free(lineData);
     free(linePoints);
 
@@ -469,6 +486,7 @@ int init() {
 
     PolygonDataFormat *polygonData;
     GLfloat *vertices;
+    PolygonVertex *polygonVertices = NULL;
     polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
     vertices = malloc(6 * nrofPolygonTriangles * sizeof(GLfloat));
     bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
@@ -481,6 +499,12 @@ int init() {
     unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, polygonVertices);
     LOGI("Finished parsing.\n");
 
+    // Upload data to graphics core vertex buffer object
+    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
+    glBufferData(GL_ARRAY_BUFFER, 3 * nrofPolygonTriangles * sizeof(PolygonVertex),
+            polygonVertices, GL_STATIC_DRAW);
+
+    free(polygonVertices);
     free(polygonData);
     free(vertices);
 
@@ -521,9 +545,12 @@ void renderFrame() {
     glUniform1f(gPolygonScaleXHandle, zPos*(float)(height)/(float)(width));
     glUniform1f(gPolygonScaleYHandle, zPos);
 
-    glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(PolygonVertex), &polygonVertices[0].x);
+    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
+    glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
+            sizeof(PolygonVertex), BUFFER_OFFSET(0));
     glEnableVertexAttribArray(gPolygonvPositionHandle);
-    glVertexAttribPointer(gPolygoncolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(PolygonVertex), &polygonVertices[0].rgba);
+    glVertexAttribPointer(gPolygoncolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+            sizeof(PolygonVertex), BUFFER_OFFSET(8));
     glEnableVertexAttribArray(gPolygoncolorHandle);
     glDrawArrays(GL_TRIANGLES, 0, 3*nrofPolygonTriangles);
 
@@ -535,15 +562,18 @@ void renderFrame() {
     glUniform1f(gLineScaleXHandle, zPos*(float)(height)/(float)(width));
     glUniform1f(gLineScaleYHandle, zPos);
 
-    int nrofVertices = 2*nrofLinePoints + 6*nrofLines;
-    glVertexAttribPointer(gLinevPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &lineVertices[0].x);
+    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+    glVertexAttribPointer(gLinevPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+            sizeof(LineVertex), BUFFER_OFFSET(0));
     glEnableVertexAttribArray(gLinevPositionHandle);
-    glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, sizeof(LineVertex), &lineVertices[0].tx);
+    glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+            sizeof(LineVertex), BUFFER_OFFSET(8));
     glEnableVertexAttribArray(gLinetexPositionHandle);
-    glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(LineVertex), &lineVertices[0].rgba);
+    glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+            sizeof(LineVertex), BUFFER_OFFSET(16));
     glEnableVertexAttribArray(gLinecolorHandle);
     glEnable(GL_TEXTURE_2D);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofVertices);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
 }
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj);
