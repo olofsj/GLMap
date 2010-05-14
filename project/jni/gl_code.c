@@ -26,8 +26,6 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "gl_aa_tex.h"
-
 #define  LOG_TAG    "libglmap"
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
 #define  LOGE(...)  __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
@@ -47,46 +45,50 @@ static void checkGlError(const char* op) {
 }
 
 static const char gLineVertexShader[] = 
-    "uniform vec4 cPosition;\n"
+    "uniform vec4 u_center;\n"
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
-    "attribute vec4 vPosition;\n"
-    "attribute vec4 texPosition;\n"
-    "attribute vec4 color;\n"
-    "varying vec2 gl_TexCoord;\n"
+    "attribute vec4 a_position;\n"
+    "attribute vec2 a_st;\n"
+    "attribute vec4 a_color;\n"
+    "varying vec2 v_st;\n"
     "varying vec4 v_color;\n"
     "void main() {\n"
-    "  vec4 a = vPosition; \n"
-    "  a.x = scaleX*(a.x - cPosition.x);\n"
-    "  a.y = scaleY*(a.y - cPosition.y);\n"
-    "  gl_TexCoord = texPosition.xy;\n"
-    "  v_color = color;\n"
+    "  vec4 a = a_position; \n"
+    "  a.x = scaleX*(a.x - u_center.x);\n"
+    "  a.y = scaleY*(a.y - u_center.y);\n"
+    "  v_st = a_st;\n"
+    "  v_color = a_color;\n"
     "  gl_Position = a;\n"
     "}\n";
 
 static const char gLineFragmentShader[] = 
+    "#extension GL_OES_standard_derivatives : enable\n"
     "precision mediump float;\n"
-    "uniform sampler2D tex;\n"
-    "varying vec2 gl_TexCoord;\n"
+    "uniform float width;\n"
+    "varying vec2 v_st;\n"
     "varying vec4 v_color;\n"
     "void main() {\n"
-    "  vec4 texel = texture2D(tex, gl_TexCoord);\n"
-    "  vec4 color = v_color * texel.a;\n"
+    "  vec2 st_width = fwidth(v_st);\n"
+    "  float fuzz = max(st_width.s, st_width.t);\n"
+    "  float alpha = 1.0 - smoothstep(width - fuzz, width + fuzz, length(v_st));\n"
+    "  vec4 color = v_color * alpha;\n"
+    "  color.rgb *= 2.0 - width;\n"
     "  gl_FragColor = color;\n"
     "}\n";
 
 static const char gPolygonVertexShader[] = 
-    "uniform vec4 cPosition;\n"
+    "uniform vec4 u_center;\n"
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
-    "attribute vec4 vPosition;\n"
-    "attribute vec4 color;\n"
+    "attribute vec4 a_position;\n"
+    "attribute vec4 a_color;\n"
     "varying vec4 v_color;\n"
     "void main() {\n"
-    "  vec4 a = vPosition; \n"
-    "  a.x = scaleX*(a.x - cPosition.x);\n"
-    "  a.y = scaleY*(a.y - cPosition.y);\n"
-    "  v_color = color;\n"
+    "  vec4 a = a_position; \n"
+    "  a.x = scaleX*(a.x - u_center.x);\n"
+    "  a.y = scaleY*(a.y - u_center.y);\n"
+    "  v_color = a_color;\n"
     "  gl_Position = a;\n"
     "}\n";
 
@@ -166,6 +168,7 @@ GLuint gLinevPositionHandle;
 GLuint gLinetexPositionHandle;
 GLuint gLinecolorHandle;
 GLuint gLinecPositionHandle;
+GLuint gLineWidthHandle;
 GLuint gLineScaleXHandle;
 GLuint gLineScaleYHandle;
 GLuint gPolygonProgram;
@@ -180,7 +183,6 @@ double zPos = 10.0;
 double center_x = 1991418.0;
 double center_y = 8267328.0;
 int width, height;
-float falloff = 0.0;
 
 typedef struct _Vec Vec;
 typedef struct _LineVertex LineVertex;
@@ -240,14 +242,14 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
         // Add the first point twice to be able to draw with GL_TRIANGLE_STRIP
         lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
         lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].tx = -1.0;
         lineVertices[ind].ty = 1.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         // For rounded line ends
         lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
         lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = 0.5;
+        lineVertices[ind].tx = -1.0;
         lineVertices[ind].ty = 1.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
@@ -260,14 +262,14 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
         // Start of line
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
-        lineVertices[ind].tx = 0.5;
-        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].tx = -1.0;
+        lineVertices[ind].ty = 0.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
         lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].ty = 0.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         n++;
@@ -303,13 +305,13 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
             lineVertices[ind].x = points[n].x + u.x*width;
             lineVertices[ind].y = points[n].y + u.y*width;
             for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-            lineVertices[ind].tx = 0.5;
-            lineVertices[ind].ty = 0.75;
+            lineVertices[ind].tx = -1.0;
+            lineVertices[ind].ty = 0.0;
             ind++;
             lineVertices[ind].x = points[n].x - u.x*width;
             lineVertices[ind].y = points[n].y - u.y*width;
             lineVertices[ind].tx = 1.0;
-            lineVertices[ind].ty = 0.75;
+            lineVertices[ind].ty = 0.0;
             for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
             ind++;
             n++;
@@ -323,34 +325,34 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
         u.x = v.y; u.y = -v.x;
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
-        lineVertices[ind].tx = 0.5;
-        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].tx = -1.0;
+        lineVertices[ind].ty = 0.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
         lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = 0.75;
+        lineVertices[ind].ty = 0.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         // For rounded line edges
         lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
         lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = 0.5;
-        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].tx = -1.0;
+        lineVertices[ind].ty = -1.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
         lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
         lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].ty = -1.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         // Add the last vertex twice to be able to draw with GL_TRIANGLE_STRIP
         lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
         lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
         lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = 0.5;
+        lineVertices[ind].ty = -1.0;
         for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
         ind++;
         n++;
@@ -391,24 +393,19 @@ int init() {
         LOGE("Could not create program.");
         return 1;
     }
-    gLinecPositionHandle = glGetUniformLocation(gLineProgram, "cPosition");
+    gLinecPositionHandle = glGetUniformLocation(gLineProgram, "u_center");
     gLineScaleXHandle = glGetUniformLocation(gLineProgram, "scaleX");
     gLineScaleYHandle = glGetUniformLocation(gLineProgram, "scaleY");
+    gLineWidthHandle = glGetUniformLocation(gLineProgram, "width");
     
-    gLinevPositionHandle = glGetAttribLocation(gLineProgram, "vPosition");
+    gLinevPositionHandle = glGetAttribLocation(gLineProgram, "a_position");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"vPosition\") = %d\n",
-            gLinevPositionHandle);
 
-    gLinetexPositionHandle = glGetAttribLocation(gLineProgram, "texPosition");
+    gLinetexPositionHandle = glGetAttribLocation(gLineProgram, "a_st");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"texPosition\") = %d\n",
-            gLinetexPositionHandle);
 
-    gLinecolorHandle = glGetAttribLocation(gLineProgram, "color");
+    gLinecolorHandle = glGetAttribLocation(gLineProgram, "a_color");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"color\") = %d\n",
-            gLinecolorHandle);
 
     // Set up the program for rendering polygons
     gPolygonProgram = createProgram(gPolygonVertexShader, gPolygonFragmentShader);
@@ -416,22 +413,15 @@ int init() {
         LOGE("Could not create program.");
         return 1;
     }
-    gPolygoncPositionHandle = glGetUniformLocation(gPolygonProgram, "cPosition");
+    gPolygoncPositionHandle = glGetUniformLocation(gPolygonProgram, "u_center");
     gPolygonScaleXHandle = glGetUniformLocation(gPolygonProgram, "scaleX");
     gPolygonScaleYHandle = glGetUniformLocation(gPolygonProgram, "scaleY");
     
-    gPolygonvPositionHandle = glGetAttribLocation(gPolygonProgram, "vPosition");
+    gPolygonvPositionHandle = glGetAttribLocation(gPolygonProgram, "a_position");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"vPosition\") = %d\n",
-            gPolygonvPositionHandle);
 
-    gPolygoncolorHandle = glGetAttribLocation(gPolygonProgram, "color");
+    gPolygoncolorHandle = glGetAttribLocation(gPolygonProgram, "a_color");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"color\") = %d\n", gPolygoncolorHandle);
-
-    // Set up texture to use for rendering lines and line endings
-    glAATexInit();
-    glAAGenerateAATex(falloff, 0, 0.5f); // 0.5 uses nearest mipmap filtering
 
     // Set up vertex buffer objects 
     GLuint vboIds[2];
@@ -572,7 +562,13 @@ void renderFrame() {
     glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
             sizeof(LineVertex), BUFFER_OFFSET(16));
     glEnableVertexAttribArray(gLinecolorHandle);
-    glEnable(GL_TEXTURE_2D);
+    
+    // Draw outlines
+    glUniform1f(gLineWidthHandle, 1.0);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
+
+    // Draw fill
+    glUniform1f(gLineWidthHandle, 0.50);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
 }
 
