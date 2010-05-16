@@ -388,6 +388,8 @@ wayparser_end(void *data, const char *el) {
 
     if (!strcmp(el, "way")) {
         if (way_type_is_used(way)) {
+            int error = 0;
+
             // Add the tagset to the index
             int tagset = add_tagset_to_index(way);
 
@@ -419,16 +421,30 @@ wayparser_end(void *data, const char *el) {
             for (cn = way.start; cn; cn = cn->next) {
                 // Get the node
                 nd = get_node(cn->id);
+                if (!nd) {
+                    // Node not found in index, abort
+                    error = 1;
+                    break;
+                }
                 mapway->vertices[i++] = scale*(nd->x - center_x);
                 mapway->vertices[i++] = scale*(nd->y - center_y);
             }
 
-            mapways = list_append(mapways, mapway);
+            if (!error) {
+                mapways = list_append(mapways, mapway);
+            }
+            else {
+                free(mapway->vertices);
+                free(mapway);
+            }
         }
         else if (polygon_type_is_used(way) && way.size > 2) {
+            int error = 0;
+
             // Call Triangle to tesselate the polygon
             struct triangulateio trin, trout;
             int size = way.size - 1; // Last point is repeat of first
+            if (size < 3) error = 1;
             trin.pointlist = malloc(2 * size * sizeof(double));
             trin.numberofpoints = size;
             trin.numberofpointattributes = 0;
@@ -441,67 +457,78 @@ wayparser_end(void *data, const char *el) {
             trin.numberofregions = 0;
             for (cn = way.start, i = 0; i < size; cn = cn->next, i++) {
                 nd = get_node(cn->id);
+                if (!nd) {
+                    // Node not found in index, abort
+                    error = 1;
+                    break;
+                }
                 trin.pointlist[2*i]   = scale*(nd->x - center_x);
                 trin.pointlist[2*i+1] = scale*(nd->y - center_y);
                 trin.segmentlist[2*i] = i;
                 trin.segmentlist[2*i+1] = (i+1) % size;
             }
-            trout.pointlist = NULL;
-            trout.segmentlist = NULL;
-            trout.segmentmarkerlist = NULL;
-            trout.pointmarkerlist = NULL;
-            trout.trianglelist = NULL;
-            //trout.holelist = NULL;
-            //trout.regionlist = NULL;
-            //trout.edgelist = NULL;
-            //trout.edgemarkerlist = NULL;
-
-            //trout.pointattributelist = NULL;
-            //trout.triangleattributelist = NULL;
-            //trout.trianglearealist = NULL;
-            //trout.neighborlist = NULL;
-            //trout.normlist = NULL;
-
-            //triangulate("-zVE", &trin, &trout, NULL);
-            triangulate("-zpQ", &trin, &trout, NULL);
-
-            MapPolygon *polygon = malloc(sizeof(MapPolygon));
-            polygon->size = trout.numberoftriangles;
-            polygon->vertices = malloc(6 * trout.numberoftriangles * sizeof(float));
-            for (i = 0; i < trout.numberoftriangles; i++) {
-                //printf("i = %d / %d\n", i, trout.numberoftriangles);
-                //printf("t = %lf\n", trout.trianglelist[i * 3]);
-                polygon->vertices[i * 6] = trout.pointlist[2*trout.trianglelist[i * 3]];
-                polygon->vertices[i * 6 + 1] = trout.pointlist[2*trout.trianglelist[i * 3]+1];
-                polygon->vertices[i * 6 + 2] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]];
-                polygon->vertices[i * 6 + 3] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]+1];
-                polygon->vertices[i * 6 + 4] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]];
-                polygon->vertices[i * 6 + 5] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]+1];
+            if (error) {
+                free(trin.pointlist);
+                free(trin.segmentlist);
             }
-            polygon->rgba[0] = 0;
-            polygon->rgba[1] = 0;
-            polygon->rgba[2] = 0;
-            polygon->rgba[3] = 0;
-            for (i = 0; i < nrof_used_polygons; i++) {
-                for (j = 0; j < way.tagset->size; j++) {
-                    if (used_polygons[i] == way.tagset->tags[j]) {
-                        polygon->rgba[0] = polygon_colors[4*i+0];
-                        polygon->rgba[1] = polygon_colors[4*i+1];
-                        polygon->rgba[2] = polygon_colors[4*i+2];
-                        polygon->rgba[3] = polygon_colors[4*i+3];
+            else {
+                trout.pointlist = NULL;
+                trout.segmentlist = NULL;
+                trout.segmentmarkerlist = NULL;
+                trout.pointmarkerlist = NULL;
+                trout.trianglelist = NULL;
+                //trout.holelist = NULL;
+                //trout.regionlist = NULL;
+                //trout.edgelist = NULL;
+                //trout.edgemarkerlist = NULL;
+
+                //trout.pointattributelist = NULL;
+                //trout.triangleattributelist = NULL;
+                //trout.trianglearealist = NULL;
+                //trout.neighborlist = NULL;
+                //trout.normlist = NULL;
+
+                //triangulate("-zVE", &trin, &trout, NULL);
+                triangulate("-zpQ", &trin, &trout, NULL);
+
+                MapPolygon *polygon = malloc(sizeof(MapPolygon));
+                polygon->size = trout.numberoftriangles;
+                polygon->vertices = malloc(6 * trout.numberoftriangles * sizeof(float));
+                for (i = 0; i < trout.numberoftriangles; i++) {
+                    //printf("i = %d / %d\n", i, trout.numberoftriangles);
+                    //printf("t = %lf\n", trout.trianglelist[i * 3]);
+                    polygon->vertices[i * 6] = trout.pointlist[2*trout.trianglelist[i * 3]];
+                    polygon->vertices[i * 6 + 1] = trout.pointlist[2*trout.trianglelist[i * 3]+1];
+                    polygon->vertices[i * 6 + 2] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]];
+                    polygon->vertices[i * 6 + 3] = trout.pointlist[2*trout.trianglelist[i * 3 + 1]+1];
+                    polygon->vertices[i * 6 + 4] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]];
+                    polygon->vertices[i * 6 + 5] = trout.pointlist[2*trout.trianglelist[i * 3 + 2]+1];
+                }
+                polygon->rgba[0] = 0;
+                polygon->rgba[1] = 0;
+                polygon->rgba[2] = 0;
+                polygon->rgba[3] = 0;
+                for (i = 0; i < nrof_used_polygons; i++) {
+                    for (j = 0; j < way.tagset->size; j++) {
+                        if (used_polygons[i] == way.tagset->tags[j]) {
+                            polygon->rgba[0] = polygon_colors[4*i+0];
+                            polygon->rgba[1] = polygon_colors[4*i+1];
+                            polygon->rgba[2] = polygon_colors[4*i+2];
+                            polygon->rgba[3] = polygon_colors[4*i+3];
+                        }
                     }
                 }
+                polygons = list_append(polygons, polygon);
+
+
+                trifree(trout.pointlist);
+                trifree(trout.segmentlist);
+                trifree(trout.segmentmarkerlist);
+                trifree(trout.pointmarkerlist);
+                trifree(trout.trianglelist);
+                free(trin.pointlist);
+                free(trin.segmentlist);
             }
-            polygons = list_append(polygons, polygon);
-
-
-            trifree(trout.pointlist);
-            trifree(trout.segmentlist);
-            trifree(trout.segmentmarkerlist);
-            trifree(trout.pointmarkerlist);
-            trifree(trout.trianglelist);
-            free(trin.pointlist);
-            free(trin.segmentlist);
         }
 
         // Free the nodes
