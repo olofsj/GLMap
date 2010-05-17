@@ -44,7 +44,11 @@ struct _Way {
 struct _MapWay {
     int length;
     float width;
-    unsigned char rgba[4];
+    float height;
+    unsigned char outline_color[4];
+    unsigned char fill_color[4];
+    int bridge;
+    int tunnel;
     float *vertices;
     RoutingTagSet *tagset;
 };
@@ -97,21 +101,71 @@ double highway_widths[] = {
    6.0,  // highway_byway
    6.0   // highway_steps 
 };
-unsigned char highway_colors[] = { 
-    136, 136, 136, 255, // highway_motorway
-    136, 136, 136, 255, // highway_motorway_link
-    136, 136, 136, 255, // highway_trunk
-    136, 136, 136, 255, // highway_trunk_link
-    136, 136, 136, 255, // highway_primary
-    136, 136, 136, 255, // highway_primary_link
-    136, 136, 136, 255, // highway_secondary
-    136, 136, 136, 255, // highway_secondary_link
-    136, 136, 136, 255, // highway_tertiary
-    136, 136, 136, 255, // highway_unclassified
-    136, 136, 136, 255, // highway_road
-    136, 136, 136, 255, // highway_residential
-    136, 136, 136, 255, // highway_living_street
-    136, 136, 136, 255, // highway_service
+double highway_height_offsets[] = { 
+   0.0, // highway_motorway
+   0.0, // highway_motorway_link
+   0.0, // highway_trunk
+   0.0, // highway_trunk_link
+   0.0, // highway_primary
+   0.0, // highway_primary_link
+   0.0, // highway_secondary
+   0.0, // highway_secondary_link
+   0.0, // highway_tertiary
+   0.0, // highway_unclassified
+   0.0, // highway_road
+   0.0,  // highway_residential
+   0.0,  // highway_living_street
+   0.0,  // highway_service
+   -0.1,  // highway_track
+   -0.1,  // highway_pedestrian
+   0.0,  // highway_services
+   -0.2,  // highway_path
+   -0.1,  // highway_cycleway
+   -0.1,  // highway_footway
+   -0.1,  // highway_bridleway
+   -0.0,  // highway_byway
+   -0.1  // highway_steps 
+};
+unsigned char highway_fill_colors[] = { 
+    225, 225, 225, 255, // highway_motorway
+    225, 225, 225, 255, // highway_motorway_link
+    225, 225, 225, 255, // highway_trunk
+    225, 225, 225, 255, // highway_trunk_link
+    225, 225, 225, 255, // highway_primary
+    225, 225, 225, 255, // highway_primary_link
+    225, 225, 225, 255, // highway_secondary
+    225, 225, 225, 255, // highway_secondary_link
+    225, 225, 225, 255, // highway_tertiary
+    225, 225, 225, 255, // highway_unclassified
+    225, 225, 225, 255, // highway_road
+    225, 225, 225, 255, // highway_residential
+    225, 225, 225, 255, // highway_living_street
+    225, 225, 225, 255, // highway_service
+    184, 166, 119, 255, // highway_track
+    145, 145, 145, 255, // highway_pedestrian
+    145, 145, 145, 255, // highway_services
+    184, 166, 119, 255, // highway_path
+    145, 145, 145, 255, // highway_cycleway
+    145, 145, 145, 255, // highway_footway
+    184, 166, 119, 255, // highway_bridleway
+    145, 145, 145, 255, // highway_byway
+    110, 110, 110, 255  // highway_steps 
+};
+unsigned char highway_outline_colors[] = { 
+    194, 194, 194, 255, // highway_motorway
+    194, 194, 194, 255, // highway_motorway_link
+    194, 194, 194, 255, // highway_trunk
+    194, 194, 194, 255, // highway_trunk_link
+    194, 194, 194, 255, // highway_primary
+    194, 194, 194, 255, // highway_primary_link
+    194, 194, 194, 255, // highway_secondary
+    194, 194, 194, 255, // highway_secondary_link
+    194, 194, 194, 255, // highway_tertiary
+    194, 194, 194, 255, // highway_unclassified
+    194, 194, 194, 255, // highway_road
+    194, 194, 194, 255, // highway_residential
+    194, 194, 194, 255, // highway_living_street
+    194, 194, 194, 255, // highway_service
     184, 166, 119, 255, // highway_track
     145, 145, 145, 255, // highway_pedestrian
     145, 145, 145, 255, // highway_services
@@ -397,18 +451,76 @@ wayparser_end(void *data, const char *el) {
             MapWay* mapway = malloc(sizeof(MapWay));
             mapway->length = 0;
             mapway->width = 5.0;
-            mapway->rgba[0] = 0;
-            mapway->rgba[1] = 0;
-            mapway->rgba[2] = 0;
-            mapway->rgba[3] = 0;
+            mapway->tunnel = 0;
+            mapway->bridge = 0;
+            mapway->height = 0;
+            mapway->outline_color[0] = 0;
+            mapway->outline_color[1] = 0;
+            mapway->outline_color[2] = 0;
+            mapway->outline_color[3] = 0;
+            mapway->fill_color[0] = 0;
+            mapway->fill_color[1] = 0;
+            mapway->fill_color[2] = 0;
+            mapway->fill_color[3] = 0;
             for (i = 0; i < nrof_used_highways; i++) {
                 for (j = 0; j < way.tagset->size; j++) {
                     if (used_highways[i] == way.tagset->tags[j]) {
                         mapway->width = highway_widths[i];
-                        mapway->rgba[0] = highway_colors[4*i+0];
-                        mapway->rgba[1] = highway_colors[4*i+1];
-                        mapway->rgba[2] = highway_colors[4*i+2];
-                        mapway->rgba[3] = highway_colors[4*i+3];
+                        mapway->height += highway_height_offsets[i];
+                        mapway->outline_color[0] = highway_outline_colors[4*i+0];
+                        mapway->outline_color[1] = highway_outline_colors[4*i+1];
+                        mapway->outline_color[2] = highway_outline_colors[4*i+2];
+                        mapway->outline_color[3] = highway_outline_colors[4*i+3];
+                        mapway->fill_color[0] = highway_fill_colors[4*i+0];
+                        mapway->fill_color[1] = highway_fill_colors[4*i+1];
+                        mapway->fill_color[2] = highway_fill_colors[4*i+2];
+                        mapway->fill_color[3] = highway_fill_colors[4*i+3];
+                    }
+                }
+            }
+            // Tunnel, bridge and layer
+            for (j = 0; j < way.tagset->size; j++) {
+                if (bridge_yes == way.tagset->tags[j]) {
+                    mapway->bridge = 1;
+                }
+                else if (tunnel_yes == way.tagset->tags[j]) {
+                    mapway->tunnel = 1;
+                }
+            }
+            if (mapway->tunnel || mapway->bridge) {
+                for (j = 0; j < way.tagset->size; j++) {
+                    if (layer_m5 == way.tagset->tags[j]) {
+                        mapway->height += -5.0;
+                    }
+                    else if (layer_m4 == way.tagset->tags[j]) {
+                        mapway->height += -4.0;
+                    }
+                    else if (layer_m3 == way.tagset->tags[j]) {
+                        mapway->height += -3.0;
+                    }
+                    else if (layer_m2 == way.tagset->tags[j]) {
+                        mapway->height += -2.0;
+                    }
+                    else if (layer_m1 == way.tagset->tags[j]) {
+                        mapway->height += -1.0;
+                    }
+                    else if (layer_0 == way.tagset->tags[j]) {
+                        mapway->height += 0.0;
+                    }
+                    else if (layer_1 == way.tagset->tags[j]) {
+                        mapway->height += 1.0;
+                    }
+                    else if (layer_2 == way.tagset->tags[j]) {
+                        mapway->height += 2.0;
+                    }
+                    else if (layer_3 == way.tagset->tags[j]) {
+                        mapway->height += 3.0;
+                    }
+                    else if (layer_4 == way.tagset->tags[j]) {
+                        mapway->height += 4.0;
+                    }
+                    else if (layer_5 == way.tagset->tags[j]) {
+                        mapway->height += 5.0;
                     }
                 }
             }
@@ -728,6 +840,7 @@ main(int argc, char **argv)
     FILE *fp;
 
     // Write lines
+    printf("Storing %d lines, %d vertices\n", nrof_lines, nrof_nodes);
     printf("Writing output (lines.map)...\n");
     fp = fopen("lines.map", "w");
     if (!fp) {
@@ -740,7 +853,11 @@ main(int argc, char **argv)
         MapWay *mapway = l->data;
         fwrite(&(mapway->length), sizeof(int), 1, fp);
         fwrite(&(mapway->width), sizeof(float), 1, fp);
-        fwrite(&(mapway->rgba), sizeof(unsigned char), 4, fp);
+        fwrite(&(mapway->height), sizeof(float), 1, fp);
+        fwrite(&(mapway->outline_color), sizeof(unsigned char), 4, fp);
+        fwrite(&(mapway->fill_color), sizeof(unsigned char), 4, fp);
+        fwrite(&(mapway->bridge), sizeof(int), 1, fp);
+        fwrite(&(mapway->tunnel), sizeof(int), 1, fp);
     }
     for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
         MapWay *mapway = l->data;

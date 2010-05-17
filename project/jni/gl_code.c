@@ -48,6 +48,7 @@ static const char gLineVertexShader[] =
     "uniform vec4 u_center;\n"
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
+    "uniform float height_offset;\n"
     "attribute vec4 a_position;\n"
     "attribute vec2 a_st;\n"
     "attribute vec4 a_color;\n"
@@ -57,6 +58,7 @@ static const char gLineVertexShader[] =
     "  vec4 a = a_position; \n"
     "  a.x = scaleX*(a.x - u_center.x);\n"
     "  a.y = scaleY*(a.y - u_center.y);\n"
+    "  a.z = -(a.z + height_offset)/10.0 + 0.5;\n"
     "  v_st = a_st;\n"
     "  v_color = a_color;\n"
     "  gl_Position = a;\n"
@@ -72,9 +74,12 @@ static const char gLineFragmentShader[] =
     "  vec2 st_width = fwidth(v_st);\n"
     "  float fuzz = max(st_width.s, st_width.t);\n"
     "  float alpha = 1.0 - smoothstep(width - fuzz, width + fuzz, length(v_st));\n"
-    "  vec4 color = v_color * alpha;\n"
-    "  color.rgb *= 2.0 - width;\n"
-    "  gl_FragColor = color;\n"
+    "  if (alpha < 0.2) {\n"
+    "    discard;\n"
+    "  } else {\n"
+    "    vec4 color = v_color * alpha;\n"
+    "    gl_FragColor = color;\n"
+    "  }\n"
     "}\n";
 
 static const char gPolygonVertexShader[] = 
@@ -88,6 +93,7 @@ static const char gPolygonVertexShader[] =
     "  vec4 a = a_position; \n"
     "  a.x = scaleX*(a.x - u_center.x);\n"
     "  a.y = scaleY*(a.y - u_center.y);\n"
+    "  a.z = 1.0;\n"
     "  v_color = a_color;\n"
     "  gl_Position = a;\n"
     "}\n";
@@ -166,14 +172,15 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
 GLuint gLineProgram;
 GLuint gLinevPositionHandle;
 GLuint gLinetexPositionHandle;
-GLuint gLinecolorHandle;
+GLuint gLineColorHandle;
 GLuint gLinecPositionHandle;
 GLuint gLineWidthHandle;
+GLuint gLineHeightOffsetHandle;
 GLuint gLineScaleXHandle;
 GLuint gLineScaleYHandle;
 GLuint gPolygonProgram;
 GLuint gPolygonvPositionHandle;
-GLuint gPolygoncolorHandle;
+GLuint gPolygonColorHandle;
 GLuint gPolygoncPositionHandle;
 GLuint gPolygonScaleXHandle;
 GLuint gPolygonScaleYHandle;
@@ -197,14 +204,20 @@ struct _Vec {
 struct _LineVertex {
     GLfloat x;
     GLfloat y;
+    GLfloat z;
     GLfloat tx;
     GLfloat ty;
-    GLubyte rgba[4];
+    GLubyte outline_color[4];
+    GLubyte fill_color[4];
 };
 struct _LineDataFormat {
     int length;
     GLfloat width;
-    GLubyte rgba[4];
+    GLfloat height;
+    GLubyte outline_color[4];
+    GLubyte fill_color[4];
+    int bridge;
+    int tunnel;
 };
 
 struct _PolygonVertex {
@@ -217,7 +230,8 @@ struct _PolygonDataFormat {
     GLubyte rgba[4];
 };
 
-void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points, LineVertex *lineVertices) {
+void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
+        LineVertex *lineVertices, int *nrofLineVertices) {
     int i, j, k;
     int n = 0;
     int ind = 0;
@@ -227,8 +241,13 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
     for (i = 0; i < nrofLines; i++) {
         int length = lineData[i].length;
         GLfloat width = lineData[i].width;
-        GLubyte color[4];
-        for (k = 0; k < 4; k++) color[k] = lineData[i].rgba[k];
+        GLubyte outline_color[4];
+        GLubyte fill_color[4];
+        for (k = 0; k < 4; k++) {
+            outline_color[k] = lineData[i].outline_color[k];
+            fill_color[k] = lineData[i].fill_color[k];
+        }
+        GLfloat z = lineData[i].height;
 
         // Calculate triangle corners for the given width
         v.x = points[n+1].x - points[n].x;
@@ -239,38 +258,72 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
 
         u.x = -v.y; u.y = v.x;
 
-        // Add the first point twice to be able to draw with GL_TRIANGLE_STRIP
-        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = -1.0;
-        lineVertices[ind].ty = 1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
-        // For rounded line ends
-        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = -1.0;
-        lineVertices[ind].ty = 1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
-        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
-        lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = 1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
+        if (!lineData[i].bridge && !lineData[i].tunnel) {
+            // Add the first point twice to be able to draw with GL_TRIANGLE_STRIP
+            lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = -1.0;
+            lineVertices[ind].ty = 1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+            // For rounded line ends
+            lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = -1.0;
+            lineVertices[ind].ty = 1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+            lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = 1.0;
+            lineVertices[ind].ty = 1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+        } else {
+            // Add the first point twice to be able to draw with GL_TRIANGLE_STRIP
+            lineVertices[ind].x = points[n].x + u.x*width;
+            lineVertices[ind].y = points[n].y + u.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = -1.0;
+            lineVertices[ind].ty = 0.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+        }
         // Start of line
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
+        lineVertices[ind].z = z;
         lineVertices[ind].tx = -1.0;
         lineVertices[ind].ty = 0.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+        for (k = 0; k < 4; k++) {
+            lineVertices[ind].fill_color[k] = fill_color[k];
+            lineVertices[ind].outline_color[k] = outline_color[k];
+        }
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
+        lineVertices[ind].z = z;
         lineVertices[ind].tx = 1.0;
         lineVertices[ind].ty = 0.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+        for (k = 0; k < 4; k++) {
+            lineVertices[ind].fill_color[k] = fill_color[k];
+            lineVertices[ind].outline_color[k] = outline_color[k];
+        }
         ind++;
         n++;
 
@@ -304,15 +357,23 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
 
             lineVertices[ind].x = points[n].x + u.x*width;
             lineVertices[ind].y = points[n].y + u.y*width;
-            for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+            lineVertices[ind].z = z;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
             lineVertices[ind].tx = -1.0;
             lineVertices[ind].ty = 0.0;
             ind++;
             lineVertices[ind].x = points[n].x - u.x*width;
             lineVertices[ind].y = points[n].y - u.y*width;
+            lineVertices[ind].z = z;
             lineVertices[ind].tx = 1.0;
             lineVertices[ind].ty = 0.0;
-            for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
             ind++;
             n++;
         }
@@ -325,38 +386,74 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
         u.x = v.y; u.y = -v.x;
         lineVertices[ind].x = points[n].x + u.x*width;
         lineVertices[ind].y = points[n].y + u.y*width;
+        lineVertices[ind].z = z;
         lineVertices[ind].tx = -1.0;
         lineVertices[ind].ty = 0.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+        for (k = 0; k < 4; k++) {
+            lineVertices[ind].fill_color[k] = fill_color[k];
+            lineVertices[ind].outline_color[k] = outline_color[k];
+        }
         ind++;
         lineVertices[ind].x = points[n].x - u.x*width;
         lineVertices[ind].y = points[n].y - u.y*width;
+        lineVertices[ind].z = z;
         lineVertices[ind].tx = 1.0;
         lineVertices[ind].ty = 0.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
+        for (k = 0; k < 4; k++) {
+            lineVertices[ind].fill_color[k] = fill_color[k];
+            lineVertices[ind].outline_color[k] = outline_color[k];
+        }
         ind++;
-        // For rounded line edges
-        lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
-        lineVertices[ind].tx = -1.0;
-        lineVertices[ind].ty = -1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
-        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
-        lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = -1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
-        // Add the last vertex twice to be able to draw with GL_TRIANGLE_STRIP
-        lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
-        lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
-        lineVertices[ind].tx = 1.0;
-        lineVertices[ind].ty = -1.0;
-        for (k = 0; k < 4; k++) lineVertices[ind].rgba[k] = color[k];
-        ind++;
+
+        if (!lineData[i].bridge && !lineData[i].tunnel) {
+            // For rounded line edges
+            lineVertices[ind].x = points[n].x + u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y + u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = -1.0;
+            lineVertices[ind].ty = -1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+            lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = 1.0;
+            lineVertices[ind].ty = -1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+            // Add the last vertex twice to be able to draw with GL_TRIANGLE_STRIP
+            lineVertices[ind].x = points[n].x - u.x*width - v.x*width;
+            lineVertices[ind].y = points[n].y - u.y*width - v.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = 1.0;
+            lineVertices[ind].ty = -1.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+        } else {
+            // Add the last vertex twice to be able to draw with GL_TRIANGLE_STRIP
+            lineVertices[ind].x = points[n].x - u.x*width;
+            lineVertices[ind].y = points[n].y - u.y*width;
+            lineVertices[ind].z = z;
+            lineVertices[ind].tx = 1.0;
+            lineVertices[ind].ty = 0.0;
+            for (k = 0; k < 4; k++) {
+                lineVertices[ind].fill_color[k] = fill_color[k];
+                lineVertices[ind].outline_color[k] = outline_color[k];
+            }
+            ind++;
+        }
         n++;
     }
+    *nrofLineVertices = ind;
 }
 
 void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *points, PolygonVertex *polygonVertices) {
@@ -396,6 +493,7 @@ int init() {
     gLinecPositionHandle = glGetUniformLocation(gLineProgram, "u_center");
     gLineScaleXHandle = glGetUniformLocation(gLineProgram, "scaleX");
     gLineScaleYHandle = glGetUniformLocation(gLineProgram, "scaleY");
+    gLineHeightOffsetHandle = glGetUniformLocation(gLineProgram, "height_offset");
     gLineWidthHandle = glGetUniformLocation(gLineProgram, "width");
     
     gLinevPositionHandle = glGetAttribLocation(gLineProgram, "a_position");
@@ -404,7 +502,7 @@ int init() {
     gLinetexPositionHandle = glGetAttribLocation(gLineProgram, "a_st");
     checkGlError("glGetAttribLocation");
 
-    gLinecolorHandle = glGetAttribLocation(gLineProgram, "a_color");
+    gLineColorHandle = glGetAttribLocation(gLineProgram, "a_color");
     checkGlError("glGetAttribLocation");
 
     // Set up the program for rendering polygons
@@ -420,7 +518,7 @@ int init() {
     gPolygonvPositionHandle = glGetAttribLocation(gPolygonProgram, "a_position");
     checkGlError("glGetAttribLocation");
 
-    gPolygoncolorHandle = glGetAttribLocation(gPolygonProgram, "a_color");
+    gPolygonColorHandle = glGetAttribLocation(gPolygonProgram, "a_color");
     checkGlError("glGetAttribLocation");
 
     // Set up vertex buffer objects 
@@ -451,11 +549,11 @@ int init() {
     fclose(fp);
     LOGI("Finished reading.\n");
 
-    // For each line, we get twice the number of points, plus one extra node in the beginning and end
-    LOGI("Parsing map line data.\n");
+    // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
     nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
     lineVertices = malloc(nrofLineVertices * sizeof(LineVertex));
-    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices);
+    LOGI("Parsing map line data.\n");
+    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, &nrofLineVertices);
     LOGI("Finished parsing.\n");
 
     // Upload data to graphics core vertex buffer object
@@ -523,7 +621,9 @@ void renderFrame() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
 
@@ -539,9 +639,9 @@ void renderFrame() {
     glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
             sizeof(PolygonVertex), BUFFER_OFFSET(0));
     glEnableVertexAttribArray(gPolygonvPositionHandle);
-    glVertexAttribPointer(gPolygoncolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+    glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
             sizeof(PolygonVertex), BUFFER_OFFSET(8));
-    glEnableVertexAttribArray(gPolygoncolorHandle);
+    glEnableVertexAttribArray(gPolygonColorHandle);
     glDrawArrays(GL_TRIANGLES, 0, 3*nrofPolygonTriangles);
 
     // Draw lines
@@ -553,22 +653,27 @@ void renderFrame() {
     glUniform1f(gLineScaleYHandle, zPos);
 
     glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glVertexAttribPointer(gLinevPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+    glVertexAttribPointer(gLinevPositionHandle, 3, GL_FLOAT, GL_FALSE, 
             sizeof(LineVertex), BUFFER_OFFSET(0));
     glEnableVertexAttribArray(gLinevPositionHandle);
     glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
-            sizeof(LineVertex), BUFFER_OFFSET(8));
+            sizeof(LineVertex), BUFFER_OFFSET(12));
     glEnableVertexAttribArray(gLinetexPositionHandle);
-    glVertexAttribPointer(gLinecolorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
-            sizeof(LineVertex), BUFFER_OFFSET(16));
-    glEnableVertexAttribArray(gLinecolorHandle);
     
     // Draw outlines
+    glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+            sizeof(LineVertex), BUFFER_OFFSET(20));
+    glEnableVertexAttribArray(gLineColorHandle);
     glUniform1f(gLineWidthHandle, 1.0);
+    glUniform1f(gLineHeightOffsetHandle, 0.0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
 
     // Draw fill
+    glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+            sizeof(LineVertex), BUFFER_OFFSET(24));
+    glEnableVertexAttribArray(gLineColorHandle);
     glUniform1f(gLineWidthHandle, 0.50);
+    glUniform1f(gLineHeightOffsetHandle, 0.5);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
 }
 
