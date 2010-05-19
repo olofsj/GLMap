@@ -74,10 +74,10 @@ static const char gLineFragmentShader[] =
     "  vec2 st_width = fwidth(v_st);\n"
     "  float fuzz = max(st_width.s, st_width.t);\n"
     "  float alpha = 1.0 - smoothstep(width - fuzz, width + fuzz, length(v_st));\n"
-    "  if (alpha < 0.2) {\n"
+    "  vec4 color = v_color * alpha;\n"
+    "  if (color.a < 0.2) {\n"
     "    discard;\n"
     "  } else {\n"
-    "    vec4 color = v_color * alpha;\n"
     "    gl_FragColor = color;\n"
     "  }\n"
     "}\n";
@@ -246,6 +246,13 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
         for (k = 0; k < 4; k++) {
             outline_color[k] = lineData[i].outline_color[k];
             fill_color[k] = lineData[i].fill_color[k];
+        }
+        if (lineData[i].bridge) {
+            // Add an outline to all bridges
+            outline_color[0] = 144;
+            outline_color[1] = 144;
+            outline_color[2] = 144;
+            outline_color[3] = 255;
         }
         GLfloat z = lineData[i].height;
 
@@ -673,7 +680,7 @@ void renderFrame() {
             sizeof(LineVertex), BUFFER_OFFSET(24));
     glEnableVertexAttribArray(gLineColorHandle);
     glUniform1f(gLineWidthHandle, 0.50);
-    glUniform1f(gLineHeightOffsetHandle, 0.5);
+    glUniform1f(gLineHeightOffsetHandle, 0.0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
 }
 

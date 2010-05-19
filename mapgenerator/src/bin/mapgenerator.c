@@ -166,21 +166,23 @@ unsigned char highway_outline_colors[] = {
     194, 194, 194, 255, // highway_residential
     194, 194, 194, 255, // highway_living_street
     194, 194, 194, 255, // highway_service
-    184, 166, 119, 255, // highway_track
-    145, 145, 145, 255, // highway_pedestrian
-    145, 145, 145, 255, // highway_services
-    184, 166, 119, 255, // highway_path
-    145, 145, 145, 255, // highway_cycleway
-    145, 145, 145, 255, // highway_footway
-    184, 166, 119, 255, // highway_bridleway
-    145, 145, 145, 255, // highway_byway
-    110, 110, 110, 255  // highway_steps 
+    0, 0, 0, 0, // highway_track
+    0, 0, 0, 0, // highway_pedestrian
+    0, 0, 0, 0, // highway_services
+    0, 0, 0, 0, // highway_path
+    0, 0, 0, 0, // highway_cycleway
+    0, 0, 0, 0, // highway_footway
+    0, 0, 0, 0, // highway_bridleway
+    0, 0, 0, 0, // highway_byway
+    0, 0, 0, 0  // highway_steps 
 };
 
 TAG used_polygons[] = { natural_land, natural_water, natural_wetland, natural_wood,
     landuse_farm, landuse_farmland, landuse_farmyard, landuse_forest, 
-    landuse_meadow, landuse_orchard, landuse_village_green, landuse_vineyard  };
-int nrof_used_polygons = 12;
+    landuse_meadow, landuse_orchard, landuse_village_green, landuse_vineyard,
+    building_yes
+};
+int nrof_used_polygons = 13;
 unsigned char polygon_colors[] = { 
   250, 245, 233, 255, // natural_land
   180, 203, 220, 255, // natural_water
@@ -193,7 +195,8 @@ unsigned char polygon_colors[] = {
   200, 216, 162, 255, // landuse_meadow
   200, 216, 162, 255, // landuse_orchard
   200, 216, 162, 255, // landuse_village_green
-  200, 216, 162, 255 // landuse_vineyard 
+  200, 216, 162, 255, // landuse_vineyard 
+  170, 170, 170, 255  // building_yes
 };
 
 /* Global variables */
@@ -488,40 +491,56 @@ wayparser_end(void *data, const char *el) {
                 }
             }
             if (mapway->tunnel || mapway->bridge) {
+                int no_layer = 1;
                 for (j = 0; j < way.tagset->size; j++) {
                     if (layer_m5 == way.tagset->tags[j]) {
                         mapway->height += -5.0;
+                        no_layer = 0;
                     }
                     else if (layer_m4 == way.tagset->tags[j]) {
                         mapway->height += -4.0;
+                        no_layer = 0;
                     }
                     else if (layer_m3 == way.tagset->tags[j]) {
                         mapway->height += -3.0;
+                        no_layer = 0;
                     }
                     else if (layer_m2 == way.tagset->tags[j]) {
                         mapway->height += -2.0;
+                        no_layer = 0;
                     }
                     else if (layer_m1 == way.tagset->tags[j]) {
                         mapway->height += -1.0;
+                        no_layer = 0;
                     }
                     else if (layer_0 == way.tagset->tags[j]) {
                         mapway->height += 0.0;
+                        no_layer = 0;
                     }
                     else if (layer_1 == way.tagset->tags[j]) {
                         mapway->height += 1.0;
+                        no_layer = 0;
                     }
                     else if (layer_2 == way.tagset->tags[j]) {
                         mapway->height += 2.0;
+                        no_layer = 0;
                     }
                     else if (layer_3 == way.tagset->tags[j]) {
                         mapway->height += 3.0;
+                        no_layer = 0;
                     }
                     else if (layer_4 == way.tagset->tags[j]) {
                         mapway->height += 4.0;
+                        no_layer = 0;
                     }
                     else if (layer_5 == way.tagset->tags[j]) {
                         mapway->height += 5.0;
+                        no_layer = 0;
                     }
+                }
+                if (no_layer) {
+                    if (mapway->bridge) mapway->height += 1.0;
+                    if (mapway->tunnel) mapway->height -= 1.0;
                 }
             }
 
