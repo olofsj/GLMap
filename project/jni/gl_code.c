@@ -187,9 +187,14 @@ GLuint gPolygonScaleYHandle;
 double xPos = 59.4;
 double yPos = 17.87;
 double zPos = 10.0;
-double center_x = 1991418.0;
-double center_y = 8267328.0;
+double center_x = 0.0;
+double center_y = 0.0;
 int width, height;
+int nrofPolygonTriangles = 0;
+int nrofLineVertices = 0;
+GLuint lineVBO;
+GLuint polygonVBO;
+
 
 typedef struct _Vec Vec;
 typedef struct _LineVertex LineVertex;
@@ -477,13 +482,84 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
     }
 }
 
-int nrofLineVertices = 0;
-int nrofLines = 0;
-GLuint lineVBO;
+int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO) {
+    // Load map data from files
+    FILE *fp;
+    int bytes_read;
+    char filename[4096];
+    char tiledir[] = "/sdcard/GLMap/tiles";
+    int nrofLines = 0;
+    int nrofPolygons = 0;
 
-int nrofPolygons = 0;
-int nrofPolygonTriangles = 0;
-GLuint polygonVBO;
+    // FIXME: Check that file exists etc.
+    snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tile);
+    LOGI("Reading map line data from file '%s'.\n", filename);
+    fp = fopen(filename, "r");
+    int nrofLinePoints;
+    bytes_read = fread(&nrofLines, sizeof(int), 1, fp);
+    bytes_read = fread(&nrofLinePoints, sizeof(int), 1, fp);
+    LOGI("Found: %d lines, %d vertices.\n", nrofLines, nrofLinePoints);
+
+    LineDataFormat *lineData;
+    GLfloat *linePoints;
+    LineVertex *lineVertices = NULL;
+    lineData = malloc(nrofLines * sizeof(LineDataFormat));
+    linePoints = malloc(2 * nrofLinePoints * sizeof(GLfloat));
+    bytes_read = fread(lineData, sizeof(LineDataFormat), nrofLines, fp);
+    bytes_read = fread(linePoints, sizeof(GLfloat), 2*nrofLinePoints, fp);
+    fclose(fp);
+    LOGI("Finished reading.\n");
+
+    // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
+    nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
+    lineVertices = malloc(nrofLineVertices * sizeof(LineVertex));
+    LOGI("Parsing map line data.\n");
+    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, &nrofLineVertices);
+    LOGI("Finished parsing.\n");
+
+    // Upload data to graphics core vertex buffer object
+    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+    glBufferData(GL_ARRAY_BUFFER, nrofLineVertices * sizeof(LineVertex),
+            lineVertices, GL_STATIC_DRAW);
+
+    free(lineVertices);
+    free(lineData);
+    free(linePoints);
+
+    // Read in polygon data
+    snprintf(filename, sizeof(filename)-1, "%s/%s.poly", tiledir, tile);
+    LOGI("Reading map polygon data from file '%s'.\n", filename);
+    fp = fopen(filename, "r");
+    bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
+    bytes_read = fread(&nrofPolygonTriangles, sizeof(int), 1, fp);
+    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, nrofPolygonTriangles);
+
+    PolygonDataFormat *polygonData;
+    GLfloat *vertices;
+    PolygonVertex *polygonVertices = NULL;
+    polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
+    vertices = malloc(6 * nrofPolygonTriangles * sizeof(GLfloat));
+    bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
+    bytes_read = fread(vertices, sizeof(GLfloat), 6 * nrofPolygonTriangles, fp);
+    fclose(fp);
+    LOGI("Finished reading.\n");
+
+    LOGI("Parsing map polygon data.\n");
+    polygonVertices = malloc(3 * nrofPolygonTriangles * sizeof(PolygonVertex));
+    unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, polygonVertices);
+    LOGI("Finished parsing.\n");
+
+    // Upload data to graphics core vertex buffer object
+    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
+    glBufferData(GL_ARRAY_BUFFER, 3 * nrofPolygonTriangles * sizeof(PolygonVertex),
+            polygonVertices, GL_STATIC_DRAW);
+
+    free(polygonVertices);
+    free(polygonData);
+    free(vertices);
+
+    return 0;
+}
 
 int init() {
     printGLString("Version", GL_VERSION);
@@ -534,74 +610,7 @@ int init() {
     lineVBO = vboIds[0];
     polygonVBO = vboIds[1];
 
-    // Load map data from files
-    FILE *fp;
-    int bytes_read;
-
-    // FIXME: Check that file exists etc.
-    LOGI("Reading map line data from file.\n");
-    fp = fopen("/sdcard/GLMap/lines.map", "r");
-    int nrofLinePoints;
-    bytes_read = fread(&nrofLines, sizeof(int), 1, fp);
-    bytes_read = fread(&nrofLinePoints, sizeof(int), 1, fp);
-    LOGI("Found: %d lines, %d vertices.\n", nrofLines, nrofLinePoints);
-
-    LineDataFormat *lineData;
-    GLfloat *linePoints;
-    LineVertex *lineVertices = NULL;
-    lineData = malloc(nrofLines * sizeof(LineDataFormat));
-    linePoints = malloc(nrofLinePoints * sizeof(GLfloat));
-    bytes_read = fread(lineData, sizeof(LineDataFormat), nrofLines, fp);
-    bytes_read = fread(linePoints, sizeof(GLfloat), 2*nrofLinePoints, fp);
-    fclose(fp);
-    LOGI("Finished reading.\n");
-
-    // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
-    nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
-    lineVertices = malloc(nrofLineVertices * sizeof(LineVertex));
-    LOGI("Parsing map line data.\n");
-    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, &nrofLineVertices);
-    LOGI("Finished parsing.\n");
-
-    // Upload data to graphics core vertex buffer object
-    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glBufferData(GL_ARRAY_BUFFER, nrofLineVertices * sizeof(LineVertex),
-            lineVertices, GL_STATIC_DRAW);
-
-    free(lineVertices);
-    free(lineData);
-    free(linePoints);
-
-    // Read in polygon data
-    LOGI("Reading map polygon data from file.\n");
-    fp = fopen("/sdcard/GLMap/polygons.map", "r");
-    bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
-    bytes_read = fread(&nrofPolygonTriangles, sizeof(int), 1, fp);
-    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, nrofPolygonTriangles);
-
-    PolygonDataFormat *polygonData;
-    GLfloat *vertices;
-    PolygonVertex *polygonVertices = NULL;
-    polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
-    vertices = malloc(6 * nrofPolygonTriangles * sizeof(GLfloat));
-    bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
-    bytes_read = fread(vertices, sizeof(GLfloat), 6 * nrofPolygonTriangles, fp);
-    fclose(fp);
-    LOGI("Finished reading.\n");
-
-    LOGI("Parsing map polygon data.\n");
-    polygonVertices = malloc(3 * nrofPolygonTriangles * sizeof(PolygonVertex));
-    unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, polygonVertices);
-    LOGI("Finished parsing.\n");
-
-    // Upload data to graphics core vertex buffer object
-    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
-    glBufferData(GL_ARRAY_BUFFER, 3 * nrofPolygonTriangles * sizeof(PolygonVertex),
-            polygonVertices, GL_STATIC_DRAW);
-
-    free(polygonVertices);
-    free(polygonData);
-    free(vertices);
+    loadMapTile("79_330", lineVBO, polygonVBO);
 
     return 0;
 }

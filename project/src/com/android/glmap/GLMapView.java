@@ -381,12 +381,9 @@ class GLMapView extends GLSurfaceView {
     private static class Renderer implements GLSurfaceView.Renderer {
         private int width = 0;
         private int height = 0;
-        //private float xPos = 59.4f;
-        //private float yPos = 17.87f;
-        //private float zPos = 10.0f;
         private double xPos = 1991418.0;
         private double yPos = 8267328.0;
-        private double zPos = 0.001f;
+        private double zPos = 0.0001f;
 
         public void onDrawFrame(GL10 gl) {
             GLMapLib.step();

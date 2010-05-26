@@ -16,11 +16,19 @@
 #define BUFF_SIZE 1048576
 
 typedef struct _WayNode WayNode;
+typedef struct _Tile Tile;
 typedef struct _Vec Vec;
 typedef struct _Way Way;
 typedef struct _TempRoutingWay TempRoutingWay;
 typedef struct _MapWay MapWay;
 typedef struct _MapPolygon MapPolygon;
+
+struct _Tile {
+    List *polygons;
+    List *ways;
+    int x;
+    int y;
+};
 
 struct _Vec {
     double x;
@@ -557,8 +565,10 @@ wayparser_end(void *data, const char *el) {
                     error = 1;
                     break;
                 }
-                mapway->vertices[i++] = scale*(nd->x - center_x);
-                mapway->vertices[i++] = scale*(nd->y - center_y);
+                //mapway->vertices[i++] = scale*(nd->x - center_x);
+                //mapway->vertices[i++] = scale*(nd->y - center_y);
+                mapway->vertices[i++] = nd->x;
+                mapway->vertices[i++] = nd->y;
             }
 
             if (!error) {
@@ -593,8 +603,10 @@ wayparser_end(void *data, const char *el) {
                     error = 1;
                     break;
                 }
-                trin.pointlist[2*i]   = scale*(nd->x - center_x);
-                trin.pointlist[2*i+1] = scale*(nd->y - center_y);
+                //trin.pointlist[2*i]   = scale*(nd->x - center_x);
+                //trin.pointlist[2*i+1] = scale*(nd->y - center_y);
+                trin.pointlist[2*i]   = nd->x;
+                trin.pointlist[2*i+1] = nd->y;
                 trin.segmentlist[2*i] = i;
                 trin.segmentlist[2*i+1] = (i+1) % size;
             }
@@ -685,7 +697,7 @@ main(int argc, char **argv)
     FILE *osmfilepointer;
     struct stat st;
     char *filename;
-    int i, j;
+    int i, j, ti, tj;
     int done;
     int len;
     List *cn, *l;
@@ -855,54 +867,137 @@ main(int argc, char **argv)
         l = l->next;
     }
 
+    // Determine bounding box for all points
+    double max_x, max_y, min_x, min_y;
+    min_x = nodes[0]->x;
+    max_x = nodes[0]->x;
+    min_y = nodes[0]->y;
+    max_y = nodes[0]->y;
+    for (i = 0; i < node_count; i++) {
+        if (nodes[i]->x > max_x)
+            max_x = nodes[i]->x;
+        if (nodes[i]->x < min_x)
+            min_x = nodes[i]->x;
+        if (nodes[i]->y > max_y)
+            max_y = nodes[i]->y;
+        if (nodes[i]->y < min_y)
+            min_y = nodes[i]->y;
+    }
+    printf("Bounding box: %lf, %lf, %lf, %lf\n", min_x, min_y, max_x, max_y);
+
+    // Set up the tiles
+    double tile_size = 25000.0;
+    int nrof_tiles_x = ceil((max_x - min_x) / tile_size);
+    int nrof_tiles_y = ceil((max_y - min_y) / tile_size);
+    int nrof_tiles = nrof_tiles_x * nrof_tiles_y;
+    Tile **tiles;
+    tiles = malloc(nrof_tiles_x * sizeof(Tile *));
+    for (i = 0; i < nrof_tiles_x; i++) {
+        tiles[i] = malloc(nrof_tiles_y * sizeof(Tile));
+        for (j = 0; j < nrof_tiles_y; j++) {
+            tiles[i][j].polygons = NULL;
+            tiles[i][j].ways = NULL;
+            tiles[i][j].x = (int)(min_x / tile_size) + i;
+            tiles[i][j].y = (int)(min_y / tile_size) + j;
+        }
+    }
+
+    printf("Splitting data into %d tiles\n", nrof_tiles);
+
+    for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
+        MapWay *mapway = l->data;
+        // FIXME: Storing the whole way in the tile where the first node is located...
+        ti = (mapway->vertices[0] - min_x)/tile_size;
+        tj = (mapway->vertices[1] - min_y)/tile_size;
+        tiles[ti][tj].ways = list_append(tiles[ti][tj].ways, mapway);
+        // FIXME: convert with scale and center coordinates?
+    }
+    for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
+        MapPolygon *polygon = l->data;
+        ti = (polygon->vertices[0] - min_x)/tile_size;
+        tj = (polygon->vertices[1] - min_y)/tile_size;
+        tiles[ti][tj].polygons = list_append(tiles[ti][tj].polygons, polygon);
+    }
+
     // Write to output files
     FILE *fp;
 
-    // Write lines
-    printf("Storing %d lines, %d vertices\n", nrof_lines, nrof_nodes);
-    printf("Writing output (lines.map)...\n");
-    fp = fopen("lines.map", "w");
-    if (!fp) {
-        fprintf(stderr, "Can't open output file for writing.\n");
-        exit(-1);
-    }
-    fwrite(&nrof_lines, sizeof(int), 1, fp);
-    fwrite(&nrof_nodes, sizeof(int), 1, fp);
-    for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
-        MapWay *mapway = l->data;
-        fwrite(&(mapway->length), sizeof(int), 1, fp);
-        fwrite(&(mapway->width), sizeof(float), 1, fp);
-        fwrite(&(mapway->height), sizeof(float), 1, fp);
-        fwrite(&(mapway->outline_color), sizeof(unsigned char), 4, fp);
-        fwrite(&(mapway->fill_color), sizeof(unsigned char), 4, fp);
-        fwrite(&(mapway->bridge), sizeof(int), 1, fp);
-        fwrite(&(mapway->tunnel), sizeof(int), 1, fp);
-    }
-    for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
-        MapWay *mapway = l->data;
-        fwrite(mapway->vertices, sizeof(float), 2*mapway->length, fp);
-    }
-    fclose(fp);
+    for (ti = 0; ti < nrof_tiles_x; ti++) {
+        for (tj = 0; tj < nrof_tiles_y; tj++) {
+            // Calculate array sizes
+            l = tiles[ti][tj].ways;
+            int nrof_lines = 0;
+            int nrof_nodes = 0;
+            while (l) {
+                MapWay *mapway = l->data;
+                l = l->next;
+                nrof_nodes += mapway->length;
+                nrof_lines++;
+            }
+
+            l = tiles[ti][tj].polygons;
+            int nrof_vertices = 0;
+            int nrof_polygons = 0;
+            while (l) {
+                MapPolygon *polygon = l->data;
+                nrof_vertices += polygon->size;
+                nrof_polygons++;
+                l = l->next;
+            }
+
+            // Write lines
+            char filename[4096];
+            snprintf(filename, sizeof(filename)-1, "%d_%d.line", 
+                    tiles[ti][tj].x, tiles[ti][tj].y);
+
+            printf("Storing %d lines, %d vertices\n", nrof_lines, nrof_nodes);
+            printf("Writing output (%s)...\n", filename);
+            fp = fopen(filename, "w");
+            if (!fp) {
+                fprintf(stderr, "Can't open output file for writing.\n");
+                exit(-1);
+            }
+            fwrite(&nrof_lines, sizeof(int), 1, fp);
+            fwrite(&nrof_nodes, sizeof(int), 1, fp);
+            for (i = 0, l=tiles[ti][tj].ways; i < nrof_lines; i++, l = l->next) {
+                MapWay *mapway = l->data;
+                fwrite(&(mapway->length), sizeof(int), 1, fp);
+                fwrite(&(mapway->width), sizeof(float), 1, fp);
+                fwrite(&(mapway->height), sizeof(float), 1, fp);
+                fwrite(&(mapway->outline_color), sizeof(unsigned char), 4, fp);
+                fwrite(&(mapway->fill_color), sizeof(unsigned char), 4, fp);
+                fwrite(&(mapway->bridge), sizeof(int), 1, fp);
+                fwrite(&(mapway->tunnel), sizeof(int), 1, fp);
+            }
+            for (i = 0, l=tiles[ti][tj].ways; i < nrof_lines; i++, l = l->next) {
+                MapWay *mapway = l->data;
+                fwrite(mapway->vertices, sizeof(float), 2*mapway->length, fp);
+            }
+            fclose(fp);
 
 
-    // Write polygons
-    printf("Writing output (polygons.map)...\n");
-    fp = fopen("polygons.map", "w");
-    if (!fp) {
-        fprintf(stderr, "Can't open output file for writing.\n");
-        exit(-1);
+            // Write polygons
+            snprintf(filename, sizeof(filename)-1, "%d_%d.poly", 
+                    tiles[ti][tj].x, tiles[ti][tj].y);
+            printf("Writing output (%s)...\n", filename);
+            fp = fopen(filename, "w");
+            if (!fp) {
+                fprintf(stderr, "Can't open output file for writing.\n");
+                exit(-1);
+            }
+            fwrite(&nrof_polygons, sizeof(int), 1, fp);
+            fwrite(&nrof_vertices, sizeof(int), 1, fp);
+            for (i = 0, l=tiles[ti][tj].polygons; i < nrof_polygons; i++, l = l->next) {
+                MapPolygon *polygon = l->data;
+                fwrite(&(polygon->size), sizeof(int), 1, fp);
+                fwrite(&(polygon->rgba), sizeof(unsigned char), 4, fp);
+            }
+            for (i = 0, l=tiles[ti][tj].polygons; i < nrof_polygons; i++, l = l->next) {
+                MapPolygon *polygon = l->data;
+                fwrite(polygon->vertices, sizeof(float), 6*polygon->size, fp);
+            }
+            fclose(fp);
+        }
     }
-    fwrite(&nrof_polygons, sizeof(int), 1, fp);
-    fwrite(&nrof_vertices, sizeof(int), 1, fp);
-    for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
-        MapPolygon *polygon = l->data;
-        fwrite(&(polygon->size), sizeof(int), 1, fp);
-        fwrite(&(polygon->rgba), sizeof(unsigned char), 4, fp);
-    }
-    for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
-        MapPolygon *polygon = l->data;
-        fwrite(polygon->vertices, sizeof(float), 6*polygon->size, fp);
-    }
-    fclose(fp);
 }
 
