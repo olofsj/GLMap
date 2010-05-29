@@ -169,7 +169,16 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
     return program;
 }
 
-#define NROF_VBOS 2
+#define NROF_TILES_X 2
+#define NROF_TILES_Y 2
+#define NROF_TILES NROF_TILES_X*NROF_TILES_Y
+
+typedef struct _Tile Tile;
+typedef struct _Vec Vec;
+typedef struct _LineVertex LineVertex;
+typedef struct _LineDataFormat LineDataFormat;
+typedef struct _PolygonVertex PolygonVertex;
+typedef struct _PolygonDataFormat PolygonDataFormat;
 
 GLuint gLineProgram;
 GLuint gLinevPositionHandle;
@@ -191,20 +200,22 @@ double yPos = 17.87;
 double zPos = 10.0;
 double tile_size = 10000.0;
 int width, height;
-int nrofPolygonTriangles[NROF_VBOS];
-int nrofLineVertices[NROF_VBOS];
-GLuint lineVBOs[NROF_VBOS];
-GLuint polygonVBOs[NROF_VBOS];
-int vboIsUsed[NROF_VBOS];
-int current_tile_x = 0;
-int current_tile_y = 0;
+Tile **tiles;
+//int nrofPolygonTriangles[NROF_TILES];
+//int nrofLineVertices[NROF_TILES];
+//GLuint lineVBOs[NROF_TILES];
+//GLuint polygonVBOs[NROF_TILES];
+//int current_tile_x = 0;
+//int current_tile_y = 0;
 
-
-typedef struct _Vec Vec;
-typedef struct _LineVertex LineVertex;
-typedef struct _LineDataFormat LineDataFormat;
-typedef struct _PolygonVertex PolygonVertex;
-typedef struct _PolygonDataFormat PolygonDataFormat;
+struct _Tile {
+    int x;
+    int y;
+    GLuint lineVBO;
+    GLuint polygonVBO;
+    GLuint nrofLineVertices;
+    GLuint nrofPolygonTriangles;
+};
 
 struct _Vec {
     GLfloat x;
@@ -569,7 +580,7 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO,
 }
 
 int init() {
-    int i;
+    int i, j;
     printGLString("Version", GL_VERSION);
     printGLString("Vendor", GL_VENDOR);
     printGLString("Renderer", GL_RENDERER);
@@ -613,15 +624,35 @@ int init() {
     checkGlError("glGetAttribLocation");
 
     // Set up vertex buffer objects 
-    GLuint vboIds[2*NROF_VBOS];
-    glGenBuffers(2*NROF_VBOS, vboIds);
-    for (i = 0; i < NROF_VBOS; i++) {
-        lineVBOs[i] = vboIds[2*i];
-        polygonVBOs[i] = vboIds[2*i+1];
-        vboIsUsed[i] = 0;
-        nrofLineVertices[i] = 0;
-        nrofPolygonTriangles[i] = 0;
+    GLuint vboIds[2*NROF_TILES];
+    glGenBuffers(2*NROF_TILES, vboIds);
+
+    // Set up the tile handles
+    tiles = malloc(NROF_TILES_X * sizeof(Tile *));
+    for (i = 0; i < NROF_TILES_X; i++) {
+        tiles[i] = malloc(NROF_TILES_Y * sizeof(Tile));
+        for (j = 0; j < NROF_TILES_Y; j++) {
+            int n = i + j*NROF_TILES_X;
+            tiles[i][j].lineVBO = vboIds[2*n];
+            tiles[i][j].polygonVBO = vboIds[2*n+1];
+            tiles[i][j].nrofLineVertices = 0;
+            tiles[i][j].nrofPolygonTriangles = 0;
+            tiles[i][j].x = -1;
+            tiles[i][j].y = -1;
+        }
     }
+
+    // Set general settings
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
+
+    LOGI("Initialization complete.\n");
 
     return 0;
 }
@@ -641,49 +672,36 @@ int setWindowSize(int w, int h) {
 void renderFrame() {
     double x, y, z;
     int i, j;
+    char tilename[256];
+
     x = xPos;
     y = yPos;
     z = zPos;
-    char tilename[256];
 
-    i = x / tile_size;
-    j = y / tile_size;
+    // Check if any new tiles need to be loaded
+    for (i = 0; i < NROF_TILES_X; i++) {
+        for (j = 0; j < NROF_TILES_Y; j++) {
+            int tx, ty, s, t;
 
-    if (i != current_tile_x || j != current_tile_y) {
-        int vbo;
-        snprintf(tilename, sizeof(tilename)-1, "%d_%d", i, j);
+            tx = (x - 0.5*tile_size) / tile_size + i;
+            ty = (y - 0.5*tile_size) / tile_size + j;
 
-        vbo = 0;
-        while (vboIsUsed[vbo]) {
-            vbo++;
+            s = tx % NROF_TILES_X;
+            t = ty % NROF_TILES_Y;
+            if (tiles[s][t].x != tx || tiles[s][t].y != ty) {
+                // Load a tile from disk
+                snprintf(tilename, sizeof(tilename)-1, "%d_%d", tx, ty);
+                loadMapTile(tilename, tiles[s][t].lineVBO, tiles[s][t].polygonVBO, 
+                        &tiles[s][t].nrofPolygonTriangles, &tiles[s][t].nrofLineVertices);
+                tiles[s][t].x = tx;
+                tiles[s][t].y = ty;
+            }
         }
-        vboIsUsed[vbo] = 1;
-        vboIsUsed[(vbo+1)%NROF_VBOS] = 0;
-        LOGI("Loading tile %s for (%lf, %lf) into VBOs (%d, %d)\n", tilename, x, y,
-                lineVBOs[vbo], polygonVBOs[vbo]);
-
-        loadMapTile(tilename, lineVBOs[vbo], polygonVBOs[vbo], 
-                &nrofPolygonTriangles[vbo], &nrofLineVertices[vbo]);
-
-        current_tile_x = i;
-        current_tile_y = j;
-
     }
 
+    // Clear the buffers
     glClearColor(0.98039, 0.96078, 0.91373, 1.0);
-
-    checkGlError("glClearColor");
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-    checkGlError("glClear");
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_STENCIL_TEST);
 
     // Draw polygons
     glUseProgram(gPolygonProgram);
@@ -693,21 +711,19 @@ void renderFrame() {
     glUniform1f(gPolygonScaleXHandle, z*(float)(height)/(float)(width));
     glUniform1f(gPolygonScaleYHandle, z);
 
-    for (i = 0; i < NROF_VBOS; i++) {
-        if (!vboIsUsed[i]) 
-            continue;
+    for (i = 0; i < NROF_TILES_X; i++) {
+        for (j = 0; j < NROF_TILES_Y; j++) {
 
-        glBindBuffer(GL_ARRAY_BUFFER, polygonVBOs[i]);
-        checkGlError("glBindBuffer polygon");
-        glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
-                sizeof(PolygonVertex), BUFFER_OFFSET(0));
-        glEnableVertexAttribArray(gPolygonvPositionHandle);
-        glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
-                sizeof(PolygonVertex), BUFFER_OFFSET(8));
-        glEnableVertexAttribArray(gPolygonColorHandle);
-        checkGlError("glEnableVertexAttribArray polygon");
-        glDrawArrays(GL_TRIANGLES, 0, 3*nrofPolygonTriangles[i]);
-        checkGlError("glDrawArrays polygon");
+            glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
+            glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
+                    sizeof(PolygonVertex), BUFFER_OFFSET(0));
+            glEnableVertexAttribArray(gPolygonvPositionHandle);
+            glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+                    sizeof(PolygonVertex), BUFFER_OFFSET(8));
+            glEnableVertexAttribArray(gPolygonColorHandle);
+            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonTriangles);
+            checkGlError("glDrawArrays polygon");
+        }
     }
 
     // Draw lines
@@ -718,36 +734,35 @@ void renderFrame() {
     glUniform1f(gLineScaleXHandle, z*(float)(height)/(float)(width));
     glUniform1f(gLineScaleYHandle, z);
 
-    for (i = 0; i < NROF_VBOS; i++) {
-        if (!vboIsUsed[i]) 
-            continue;
+    for (i = 0; i < NROF_TILES_X; i++) {
+        for (j = 0; j < NROF_TILES_Y; j++) {
 
-        glBindBuffer(GL_ARRAY_BUFFER, lineVBOs[i]);
-        checkGlError("glBindBuffer line");
+            glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].lineVBO);
 
-        glVertexAttribPointer(gLinevPositionHandle, 3, GL_FLOAT, GL_FALSE, 
-                sizeof(LineVertex), BUFFER_OFFSET(0));
-        glEnableVertexAttribArray(gLinevPositionHandle);
-        glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
-                sizeof(LineVertex), BUFFER_OFFSET(12));
-        glEnableVertexAttribArray(gLinetexPositionHandle);
+            glVertexAttribPointer(gLinevPositionHandle, 3, GL_FLOAT, GL_FALSE, 
+                    sizeof(LineVertex), BUFFER_OFFSET(0));
+            glEnableVertexAttribArray(gLinevPositionHandle);
+            glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+                    sizeof(LineVertex), BUFFER_OFFSET(12));
+            glEnableVertexAttribArray(gLinetexPositionHandle);
 
-        // Draw outlines
-        glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
-                sizeof(LineVertex), BUFFER_OFFSET(20));
-        glEnableVertexAttribArray(gLineColorHandle);
-        glUniform1f(gLineWidthHandle, 1.0);
-        glUniform1f(gLineHeightOffsetHandle, 0.0);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices[i]);
+            // Draw outlines
+            glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+                    sizeof(LineVertex), BUFFER_OFFSET(20));
+            glEnableVertexAttribArray(gLineColorHandle);
+            glUniform1f(gLineWidthHandle, 1.0);
+            glUniform1f(gLineHeightOffsetHandle, 0.0);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, tiles[i][j].nrofLineVertices);
 
-        // Draw fill
-        glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
-                sizeof(LineVertex), BUFFER_OFFSET(24));
-        glEnableVertexAttribArray(gLineColorHandle);
-        glUniform1f(gLineWidthHandle, 0.50);
-        glUniform1f(gLineHeightOffsetHandle, 0.0);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices[i]);
-        checkGlError("glDrawArrays lines");
+            // Draw fill
+            glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+                    sizeof(LineVertex), BUFFER_OFFSET(24));
+            glEnableVertexAttribArray(gLineColorHandle);
+            glUniform1f(gLineWidthHandle, 0.50);
+            glUniform1f(gLineHeightOffsetHandle, 0.0);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, tiles[i][j].nrofLineVertices);
+            checkGlError("glDrawArrays lines");
+        }
     }
 }
 
