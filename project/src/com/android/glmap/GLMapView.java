@@ -104,6 +104,7 @@ class GLMapView extends GLSurfaceView {
         }
         else if (action == MotionEvent.ACTION_MOVE && !this.multitouch) {
             this.renderer.move(event.getX() - this.cursorX, this.cursorY - event.getY());
+            requestRender();
             this.cursorX = event.getX();
             this.cursorY = event.getY();
         }
@@ -113,6 +114,7 @@ class GLMapView extends GLSurfaceView {
             float z = FloatMath.sqrt(dx*dx + dy*dy);
             if (z/this.cursorZ > 0.5 && z/this.cursorZ < 2.0) {
                 this.renderer.zoom(z/this.cursorZ);
+                requestRender();
             }
             this.cursorZ = z;
         }
@@ -150,6 +152,7 @@ class GLMapView extends GLSurfaceView {
         /* Set the renderer responsible for frame rendering */
         this.renderer = new Renderer();
         setRenderer(this.renderer);
+        setRenderMode(RENDERMODE_WHEN_DIRTY);
     }
 
     private static class ContextFactory implements GLSurfaceView.EGLContextFactory {
@@ -381,8 +384,8 @@ class GLMapView extends GLSurfaceView {
     private static class Renderer implements GLSurfaceView.Renderer {
         private int width = 0;
         private int height = 0;
-        private double xPos = 1991418.0;
-        private double yPos = 8267328.0;
+        private double xPos = 1997500.0;
+        private double yPos = 8252500.0;
         private double zPos = 0.0001f;
 
         public void onDrawFrame(GL10 gl) {

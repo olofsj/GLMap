@@ -169,6 +169,8 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
     return program;
 }
 
+#define NROF_VBOS 2
+
 GLuint gLineProgram;
 GLuint gLinevPositionHandle;
 GLuint gLinetexPositionHandle;
@@ -187,13 +189,15 @@ GLuint gPolygonScaleYHandle;
 double xPos = 59.4;
 double yPos = 17.87;
 double zPos = 10.0;
-double center_x = 0.0;
-double center_y = 0.0;
+double tile_size = 10000.0;
 int width, height;
-int nrofPolygonTriangles = 0;
-int nrofLineVertices = 0;
-GLuint lineVBO;
-GLuint polygonVBO;
+int nrofPolygonTriangles[NROF_VBOS];
+int nrofLineVertices[NROF_VBOS];
+GLuint lineVBOs[NROF_VBOS];
+GLuint polygonVBOs[NROF_VBOS];
+int vboIsUsed[NROF_VBOS];
+int current_tile_x = 0;
+int current_tile_y = 0;
 
 
 typedef struct _Vec Vec;
@@ -482,7 +486,8 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
     }
 }
 
-int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO) {
+int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO, 
+        GLuint *nrofPolygonTriangles, GLuint *nrofLineVertices) {
     // Load map data from files
     FILE *fp;
     int bytes_read;
@@ -511,16 +516,17 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO) {
     LOGI("Finished reading.\n");
 
     // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
-    nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
-    lineVertices = malloc(nrofLineVertices * sizeof(LineVertex));
+    *nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
+    lineVertices = malloc(*nrofLineVertices * sizeof(LineVertex));
     LOGI("Parsing map line data.\n");
-    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, &nrofLineVertices);
+    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, nrofLineVertices);
     LOGI("Finished parsing.\n");
 
     // Upload data to graphics core vertex buffer object
     glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glBufferData(GL_ARRAY_BUFFER, nrofLineVertices * sizeof(LineVertex),
-            lineVertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, *nrofLineVertices * sizeof(LineVertex),
+            lineVertices, GL_DYNAMIC_DRAW);
+    //checkGlError("glBufferData line");
 
     free(lineVertices);
     free(lineData);
@@ -531,28 +537,29 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO) {
     LOGI("Reading map polygon data from file '%s'.\n", filename);
     fp = fopen(filename, "r");
     bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
-    bytes_read = fread(&nrofPolygonTriangles, sizeof(int), 1, fp);
-    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, nrofPolygonTriangles);
+    bytes_read = fread(nrofPolygonTriangles, sizeof(int), 1, fp);
+    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, *nrofPolygonTriangles);
 
     PolygonDataFormat *polygonData;
     GLfloat *vertices;
     PolygonVertex *polygonVertices = NULL;
     polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
-    vertices = malloc(6 * nrofPolygonTriangles * sizeof(GLfloat));
+    vertices = malloc(6 * *nrofPolygonTriangles * sizeof(GLfloat));
     bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
-    bytes_read = fread(vertices, sizeof(GLfloat), 6 * nrofPolygonTriangles, fp);
+    bytes_read = fread(vertices, sizeof(GLfloat), 6 * *nrofPolygonTriangles, fp);
     fclose(fp);
     LOGI("Finished reading.\n");
 
     LOGI("Parsing map polygon data.\n");
-    polygonVertices = malloc(3 * nrofPolygonTriangles * sizeof(PolygonVertex));
+    polygonVertices = malloc(3 * *nrofPolygonTriangles * sizeof(PolygonVertex));
     unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, polygonVertices);
     LOGI("Finished parsing.\n");
 
     // Upload data to graphics core vertex buffer object
     glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
-    glBufferData(GL_ARRAY_BUFFER, 3 * nrofPolygonTriangles * sizeof(PolygonVertex),
-            polygonVertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 3 * *nrofPolygonTriangles * sizeof(PolygonVertex),
+            polygonVertices, GL_DYNAMIC_DRAW);
+    //checkGlError("glBufferData polygon");
 
     free(polygonVertices);
     free(polygonData);
@@ -562,6 +569,7 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO) {
 }
 
 int init() {
+    int i;
     printGLString("Version", GL_VERSION);
     printGLString("Vendor", GL_VENDOR);
     printGLString("Renderer", GL_RENDERER);
@@ -605,12 +613,15 @@ int init() {
     checkGlError("glGetAttribLocation");
 
     // Set up vertex buffer objects 
-    GLuint vboIds[2];
-    glGenBuffers(2, vboIds);
-    lineVBO = vboIds[0];
-    polygonVBO = vboIds[1];
-
-    loadMapTile("79_330", lineVBO, polygonVBO);
+    GLuint vboIds[2*NROF_VBOS];
+    glGenBuffers(2*NROF_VBOS, vboIds);
+    for (i = 0; i < NROF_VBOS; i++) {
+        lineVBOs[i] = vboIds[2*i];
+        polygonVBOs[i] = vboIds[2*i+1];
+        vboIsUsed[i] = 0;
+        nrofLineVertices[i] = 0;
+        nrofPolygonTriangles[i] = 0;
+    }
 
     return 0;
 }
@@ -628,6 +639,37 @@ int setWindowSize(int w, int h) {
 }
 
 void renderFrame() {
+    double x, y, z;
+    int i, j;
+    x = xPos;
+    y = yPos;
+    z = zPos;
+    char tilename[256];
+
+    i = x / tile_size;
+    j = y / tile_size;
+
+    if (i != current_tile_x || j != current_tile_y) {
+        int vbo;
+        snprintf(tilename, sizeof(tilename)-1, "%d_%d", i, j);
+
+        vbo = 0;
+        while (vboIsUsed[vbo]) {
+            vbo++;
+        }
+        vboIsUsed[vbo] = 1;
+        vboIsUsed[(vbo+1)%NROF_VBOS] = 0;
+        LOGI("Loading tile %s for (%lf, %lf) into VBOs (%d, %d)\n", tilename, x, y,
+                lineVBOs[vbo], polygonVBOs[vbo]);
+
+        loadMapTile(tilename, lineVBOs[vbo], polygonVBOs[vbo], 
+                &nrofPolygonTriangles[vbo], &nrofLineVertices[vbo]);
+
+        current_tile_x = i;
+        current_tile_y = j;
+
+    }
+
     glClearColor(0.98039, 0.96078, 0.91373, 1.0);
 
     checkGlError("glClearColor");
@@ -647,50 +689,66 @@ void renderFrame() {
     glUseProgram(gPolygonProgram);
     checkGlError("glUseProgram");
 
-    glUniform4f(gPolygoncPositionHandle, xPos, yPos, 0.0, 0.0);
-    glUniform1f(gPolygonScaleXHandle, zPos*(float)(height)/(float)(width));
-    glUniform1f(gPolygonScaleYHandle, zPos);
+    glUniform4f(gPolygoncPositionHandle, x, y, 0.0, 0.0);
+    glUniform1f(gPolygonScaleXHandle, z*(float)(height)/(float)(width));
+    glUniform1f(gPolygonScaleYHandle, z);
 
-    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
-    glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
-            sizeof(PolygonVertex), BUFFER_OFFSET(0));
-    glEnableVertexAttribArray(gPolygonvPositionHandle);
-    glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
-            sizeof(PolygonVertex), BUFFER_OFFSET(8));
-    glEnableVertexAttribArray(gPolygonColorHandle);
-    glDrawArrays(GL_TRIANGLES, 0, 3*nrofPolygonTriangles);
+    for (i = 0; i < NROF_VBOS; i++) {
+        if (!vboIsUsed[i]) 
+            continue;
+
+        glBindBuffer(GL_ARRAY_BUFFER, polygonVBOs[i]);
+        checkGlError("glBindBuffer polygon");
+        glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
+                sizeof(PolygonVertex), BUFFER_OFFSET(0));
+        glEnableVertexAttribArray(gPolygonvPositionHandle);
+        glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+                sizeof(PolygonVertex), BUFFER_OFFSET(8));
+        glEnableVertexAttribArray(gPolygonColorHandle);
+        checkGlError("glEnableVertexAttribArray polygon");
+        glDrawArrays(GL_TRIANGLES, 0, 3*nrofPolygonTriangles[i]);
+        checkGlError("glDrawArrays polygon");
+    }
 
     // Draw lines
     glUseProgram(gLineProgram);
     checkGlError("glUseProgram");
 
-    glUniform4f(gLinecPositionHandle, xPos, yPos, 0.0, 0.0);
-    glUniform1f(gLineScaleXHandle, zPos*(float)(height)/(float)(width));
-    glUniform1f(gLineScaleYHandle, zPos);
+    glUniform4f(gLinecPositionHandle, x, y, 0.0, 0.0);
+    glUniform1f(gLineScaleXHandle, z*(float)(height)/(float)(width));
+    glUniform1f(gLineScaleYHandle, z);
 
-    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glVertexAttribPointer(gLinevPositionHandle, 3, GL_FLOAT, GL_FALSE, 
-            sizeof(LineVertex), BUFFER_OFFSET(0));
-    glEnableVertexAttribArray(gLinevPositionHandle);
-    glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
-            sizeof(LineVertex), BUFFER_OFFSET(12));
-    glEnableVertexAttribArray(gLinetexPositionHandle);
-    
-    // Draw outlines
-    glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
-            sizeof(LineVertex), BUFFER_OFFSET(20));
-    glEnableVertexAttribArray(gLineColorHandle);
-    glUniform1f(gLineWidthHandle, 1.0);
-    glUniform1f(gLineHeightOffsetHandle, 0.0);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
+    for (i = 0; i < NROF_VBOS; i++) {
+        if (!vboIsUsed[i]) 
+            continue;
 
-    // Draw fill
-    glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
-            sizeof(LineVertex), BUFFER_OFFSET(24));
-    glEnableVertexAttribArray(gLineColorHandle);
-    glUniform1f(gLineWidthHandle, 0.50);
-    glUniform1f(gLineHeightOffsetHandle, 0.0);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices);
+        glBindBuffer(GL_ARRAY_BUFFER, lineVBOs[i]);
+        checkGlError("glBindBuffer line");
+
+        glVertexAttribPointer(gLinevPositionHandle, 3, GL_FLOAT, GL_FALSE, 
+                sizeof(LineVertex), BUFFER_OFFSET(0));
+        glEnableVertexAttribArray(gLinevPositionHandle);
+        glVertexAttribPointer(gLinetexPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+                sizeof(LineVertex), BUFFER_OFFSET(12));
+        glEnableVertexAttribArray(gLinetexPositionHandle);
+
+        // Draw outlines
+        glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+                sizeof(LineVertex), BUFFER_OFFSET(20));
+        glEnableVertexAttribArray(gLineColorHandle);
+        glUniform1f(gLineWidthHandle, 1.0);
+        glUniform1f(gLineHeightOffsetHandle, 0.0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices[i]);
+
+        // Draw fill
+        glVertexAttribPointer(gLineColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE, 
+                sizeof(LineVertex), BUFFER_OFFSET(24));
+        glEnableVertexAttribArray(gLineColorHandle);
+        glUniform1f(gLineWidthHandle, 0.50);
+        glUniform1f(gLineHeightOffsetHandle, 0.0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, nrofLineVertices[i]);
+        checkGlError("glDrawArrays lines");
+    }
 }
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_init(JNIEnv * env, jobject obj);
@@ -715,7 +773,7 @@ JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobjec
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobject obj, jdouble x, jdouble y, jdouble z)
 {
-    xPos = x - center_x;
-    yPos = y - center_y;
+    xPos = x;
+    yPos = y;
     zPos = z;
 }

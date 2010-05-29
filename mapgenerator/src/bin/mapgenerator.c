@@ -886,9 +886,11 @@ main(int argc, char **argv)
     printf("Bounding box: %lf, %lf, %lf, %lf\n", min_x, min_y, max_x, max_y);
 
     // Set up the tiles
-    double tile_size = 25000.0;
-    int nrof_tiles_x = ceil((max_x - min_x) / tile_size);
-    int nrof_tiles_y = ceil((max_y - min_y) / tile_size);
+    double tile_size = 10000.0;
+    int start_tile_x = min_x / tile_size;
+    int start_tile_y = min_y / tile_size;
+    int nrof_tiles_x = ceil(max_x / tile_size) - start_tile_x;
+    int nrof_tiles_y = ceil(max_y / tile_size) - start_tile_y;
     int nrof_tiles = nrof_tiles_x * nrof_tiles_y;
     Tile **tiles;
     tiles = malloc(nrof_tiles_x * sizeof(Tile *));
@@ -897,25 +899,25 @@ main(int argc, char **argv)
         for (j = 0; j < nrof_tiles_y; j++) {
             tiles[i][j].polygons = NULL;
             tiles[i][j].ways = NULL;
-            tiles[i][j].x = (int)(min_x / tile_size) + i;
-            tiles[i][j].y = (int)(min_y / tile_size) + j;
+            tiles[i][j].x = start_tile_x + i;
+            tiles[i][j].y = start_tile_y + j;
         }
     }
 
-    printf("Splitting data into %d tiles\n", nrof_tiles);
+    printf("Splitting data into %dx%d tiles\n", nrof_tiles_x, nrof_tiles_y);
 
     for (i = 0, l=mapways; i < nrof_lines; i++, l = l->next) {
         MapWay *mapway = l->data;
         // FIXME: Storing the whole way in the tile where the first node is located...
-        ti = (mapway->vertices[0] - min_x)/tile_size;
-        tj = (mapway->vertices[1] - min_y)/tile_size;
+        ti = (int)(mapway->vertices[0]/tile_size) - start_tile_x;
+        tj = (int)(mapway->vertices[1]/tile_size) - start_tile_y;
         tiles[ti][tj].ways = list_append(tiles[ti][tj].ways, mapway);
         // FIXME: convert with scale and center coordinates?
     }
     for (i = 0, l=polygons; i < nrof_polygons; i++, l = l->next) {
         MapPolygon *polygon = l->data;
-        ti = (polygon->vertices[0] - min_x)/tile_size;
-        tj = (polygon->vertices[1] - min_y)/tile_size;
+        ti = (int)(polygon->vertices[0]/tile_size) - start_tile_x;
+        tj = (int)(polygon->vertices[1]/tile_size) - start_tile_y;
         tiles[ti][tj].polygons = list_append(tiles[ti][tj].polygons, polygon);
     }
 
