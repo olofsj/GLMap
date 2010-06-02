@@ -886,7 +886,7 @@ main(int argc, char **argv)
     printf("Bounding box: %lf, %lf, %lf, %lf\n", min_x, min_y, max_x, max_y);
 
     // Set up the tiles
-    double tile_size = 10000.0;
+    double tile_size = 5000.0;
     int start_tile_x = min_x / tile_size;
     int start_tile_y = min_y / tile_size;
     int nrof_tiles_x = ceil(max_x / tile_size) - start_tile_x;

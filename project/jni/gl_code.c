@@ -198,15 +198,9 @@ GLuint gPolygonScaleYHandle;
 double xPos = 59.4;
 double yPos = 17.87;
 double zPos = 10.0;
-double tile_size = 10000.0;
+double tile_size = 5000.0;
 int width, height;
 Tile **tiles;
-//int nrofPolygonTriangles[NROF_TILES];
-//int nrofLineVertices[NROF_TILES];
-//GLuint lineVBOs[NROF_TILES];
-//GLuint polygonVBOs[NROF_TILES];
-//int current_tile_x = 0;
-//int current_tile_y = 0;
 
 struct _Tile {
     int x;
@@ -215,6 +209,9 @@ struct _Tile {
     GLuint polygonVBO;
     GLuint nrofLineVertices;
     GLuint nrofPolygonTriangles;
+    GLubyte newData;
+    LineVertex *lineVertices;
+    PolygonVertex *polygonVertices;
 };
 
 struct _Vec {
@@ -497,8 +494,7 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
     }
 }
 
-int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO, 
-        GLuint *nrofPolygonTriangles, GLuint *nrofLineVertices) {
+int loadMapTile(char *tilename, Tile *tile) {
     // Load map data from files
     FILE *fp;
     int bytes_read;
@@ -508,7 +504,7 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO,
     int nrofPolygons = 0;
 
     // FIXME: Check that file exists etc.
-    snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tile);
+    snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tilename);
     LOGI("Reading map line data from file '%s'.\n", filename);
     fp = fopen(filename, "r");
     int nrofLinePoints;
@@ -518,7 +514,6 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO,
 
     LineDataFormat *lineData;
     GLfloat *linePoints;
-    LineVertex *lineVertices = NULL;
     lineData = malloc(nrofLines * sizeof(LineDataFormat));
     linePoints = malloc(2 * nrofLinePoints * sizeof(GLfloat));
     bytes_read = fread(lineData, sizeof(LineDataFormat), nrofLines, fp);
@@ -527,52 +522,41 @@ int loadMapTile(char *tile, GLuint lineVBO, GLuint polygonVBO,
     LOGI("Finished reading.\n");
 
     // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
-    *nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
-    lineVertices = malloc(*nrofLineVertices * sizeof(LineVertex));
+    tile->nrofLineVertices = 2*nrofLinePoints + 6*nrofLines;
+    if (tile->lineVertices)
+        free(tile->lineVertices);
+    tile->lineVertices = malloc(tile->nrofLineVertices * sizeof(LineVertex));
     LOGI("Parsing map line data.\n");
-    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, lineVertices, nrofLineVertices);
+    unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, tile->lineVertices, &tile->nrofLineVertices);
     LOGI("Finished parsing.\n");
 
-    // Upload data to graphics core vertex buffer object
-    glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glBufferData(GL_ARRAY_BUFFER, *nrofLineVertices * sizeof(LineVertex),
-            lineVertices, GL_DYNAMIC_DRAW);
-    //checkGlError("glBufferData line");
-
-    free(lineVertices);
     free(lineData);
     free(linePoints);
 
     // Read in polygon data
-    snprintf(filename, sizeof(filename)-1, "%s/%s.poly", tiledir, tile);
+    snprintf(filename, sizeof(filename)-1, "%s/%s.poly", tiledir, tilename);
     LOGI("Reading map polygon data from file '%s'.\n", filename);
     fp = fopen(filename, "r");
     bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
-    bytes_read = fread(nrofPolygonTriangles, sizeof(int), 1, fp);
-    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, *nrofPolygonTriangles);
+    bytes_read = fread(&tile->nrofPolygonTriangles, sizeof(int), 1, fp);
+    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, tile->nrofPolygonTriangles);
 
     PolygonDataFormat *polygonData;
     GLfloat *vertices;
-    PolygonVertex *polygonVertices = NULL;
     polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
-    vertices = malloc(6 * *nrofPolygonTriangles * sizeof(GLfloat));
+    vertices = malloc(6 * tile->nrofPolygonTriangles * sizeof(GLfloat));
     bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
-    bytes_read = fread(vertices, sizeof(GLfloat), 6 * *nrofPolygonTriangles, fp);
+    bytes_read = fread(vertices, sizeof(GLfloat), 6 * tile->nrofPolygonTriangles, fp);
     fclose(fp);
     LOGI("Finished reading.\n");
 
     LOGI("Parsing map polygon data.\n");
-    polygonVertices = malloc(3 * *nrofPolygonTriangles * sizeof(PolygonVertex));
-    unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, polygonVertices);
+    if (tile->polygonVertices) 
+        free(tile->polygonVertices);
+    tile->polygonVertices = malloc(3 * tile->nrofPolygonTriangles * sizeof(PolygonVertex));
+    unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, tile->polygonVertices);
     LOGI("Finished parsing.\n");
 
-    // Upload data to graphics core vertex buffer object
-    glBindBuffer(GL_ARRAY_BUFFER, polygonVBO);
-    glBufferData(GL_ARRAY_BUFFER, 3 * *nrofPolygonTriangles * sizeof(PolygonVertex),
-            polygonVertices, GL_DYNAMIC_DRAW);
-    //checkGlError("glBufferData polygon");
-
-    free(polygonVertices);
     free(polygonData);
     free(vertices);
 
@@ -639,6 +623,9 @@ int init() {
             tiles[i][j].nrofPolygonTriangles = 0;
             tiles[i][j].x = -1;
             tiles[i][j].y = -1;
+            tiles[i][j].newData = 0;
+            tiles[i][j].lineVertices = NULL;
+            tiles[i][j].polygonVertices = NULL;
         }
     }
 
@@ -678,23 +665,21 @@ void renderFrame() {
     y = yPos;
     z = zPos;
 
-    // Check if any new tiles need to be loaded
+    // Check if any new tiles need to be loaded into graphics memory
     for (i = 0; i < NROF_TILES_X; i++) {
         for (j = 0; j < NROF_TILES_Y; j++) {
-            int tx, ty, s, t;
+            if (tiles[i][j].newData) {
+                // Upload line data to graphics core vertex buffer object
+                glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].lineVBO);
+                glBufferData(GL_ARRAY_BUFFER, tiles[i][j].nrofLineVertices * sizeof(LineVertex),
+                        tiles[i][j].lineVertices, GL_DYNAMIC_DRAW);
 
-            tx = (x - 0.5*tile_size) / tile_size + i;
-            ty = (y - 0.5*tile_size) / tile_size + j;
+                // Upload polygon data to graphics core vertex buffer object
+                glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
+                glBufferData(GL_ARRAY_BUFFER, 3 * tiles[i][j].nrofPolygonTriangles * sizeof(PolygonVertex),
+                        tiles[i][j].polygonVertices, GL_DYNAMIC_DRAW);
 
-            s = tx % NROF_TILES_X;
-            t = ty % NROF_TILES_Y;
-            if (tiles[s][t].x != tx || tiles[s][t].y != ty) {
-                // Load a tile from disk
-                snprintf(tilename, sizeof(tilename)-1, "%d_%d", tx, ty);
-                loadMapTile(tilename, tiles[s][t].lineVBO, tiles[s][t].polygonVBO, 
-                        &tiles[s][t].nrofPolygonTriangles, &tiles[s][t].nrofLineVertices);
-                tiles[s][t].x = tx;
-                tiles[s][t].y = ty;
+                tiles[i][j].newData = 0;
             }
         }
     }
@@ -788,7 +773,32 @@ JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_step(JNIEnv * env, jobjec
 
 JNIEXPORT void JNICALL Java_com_android_glmap_GLMapLib_move(JNIEnv * env, jobject obj, jdouble x, jdouble y, jdouble z)
 {
+    int i, j;
+    char tilename[256];
+
     xPos = x;
     yPos = y;
     zPos = z;
+
+    // Check if any new tiles need to be loaded
+    for (i = 0; i < NROF_TILES_X; i++) {
+        for (j = 0; j < NROF_TILES_Y; j++) {
+            int tx, ty, s, t;
+
+            tx = (x - 0.5*tile_size) / tile_size + i;
+            ty = (y - 0.5*tile_size) / tile_size + j;
+
+            s = tx % NROF_TILES_X;
+            t = ty % NROF_TILES_Y;
+            if (tiles[s][t].x != tx || tiles[s][t].y != ty) {
+                // Load a tile from disk
+                snprintf(tilename, sizeof(tilename)-1, "%d_%d", tx, ty);
+                loadMapTile(tilename, &tiles[s][t]);
+                tiles[s][t].x = tx;
+                tiles[s][t].y = ty;
+                tiles[s][t].newData = 1;
+            }
+        }
+    }
+
 }
