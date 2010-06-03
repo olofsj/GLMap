@@ -38,14 +38,18 @@ import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.FloatMath;
+import android.widget.Scroller;
+import android.view.animation.AccelerateInterpolator;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-
+import android.view.GestureDetector;
+import android.view.GestureDetector.SimpleOnGestureListener;
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.egl.EGLContext;
 import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.opengles.GL10;
+import java.lang.Math;
 
 /**
  * A simple GLSurfaceView sub-class that demonstrate how to perform
@@ -73,6 +77,8 @@ class GLMapView extends GLSurfaceView {
     private float cursorZ;
     private boolean multitouch = false;
     private Renderer renderer;
+    private GestureDetector gestureDetector;
+    private Scroller scroller;
 
     public GLMapView(Context context) {
         super(context);
@@ -86,27 +92,12 @@ class GLMapView extends GLSurfaceView {
 
     @Override public boolean onTouchEvent(MotionEvent event) {
         int action = event.getAction();
-        if (action == MotionEvent.ACTION_DOWN) {
-            this.cursorX = event.getX();
-            this.cursorY = event.getY();
-        }
-        else if (action == MotionEvent.ACTION_POINTER_2_DOWN) {
+        if (action == MotionEvent.ACTION_POINTER_2_DOWN) {
             this.multitouch = true;
             float dx = event.getX(1) - event.getX(0);
             float dy = event.getY(1) - event.getY(0);
             float z = FloatMath.sqrt(dx*dx + dy*dy);
             this.cursorZ = z;
-        }
-        else if (action == MotionEvent.ACTION_POINTER_2_UP) {
-            this.multitouch = false;
-            this.cursorX = event.getX();
-            this.cursorY = event.getY();
-        }
-        else if (action == MotionEvent.ACTION_MOVE && !this.multitouch) {
-            this.renderer.move(event.getX() - this.cursorX, this.cursorY - event.getY());
-            requestRender();
-            this.cursorX = event.getX();
-            this.cursorY = event.getY();
         }
         else if (action == MotionEvent.ACTION_MOVE && this.multitouch) {
             float dx = event.getX(1) - event.getX(0);
@@ -114,12 +105,17 @@ class GLMapView extends GLSurfaceView {
             float z = FloatMath.sqrt(dx*dx + dy*dy);
             if (z/this.cursorZ > 0.5 && z/this.cursorZ < 2.0) {
                 this.renderer.zoom(z/this.cursorZ);
-                requestRender();
             }
             this.cursorZ = z;
         }
         else if (action == MotionEvent.ACTION_UP && this.multitouch) {
             this.multitouch = false;
+        }
+        else if (action == MotionEvent.ACTION_POINTER_2_UP) {
+            this.multitouch = false;
+        }
+        else {
+            this.gestureDetector.onTouchEvent(event);
         }
         return true;
     }
@@ -150,9 +146,13 @@ class GLMapView extends GLSurfaceView {
                              new ConfigChooser(5, 6, 5, 0, depth, stencil) );
 
         /* Set the renderer responsible for frame rendering */
-        this.renderer = new Renderer();
+        this.renderer = new Renderer(this);
         setRenderer(this.renderer);
         setRenderMode(RENDERMODE_WHEN_DIRTY);
+
+        // Gesture detection
+        this.gestureDetector = new GestureDetector(new MapGestureDetector(this));
+        this.scroller = new Scroller(this.getContext(), new AccelerateInterpolator());
     }
 
     private static class ContextFactory implements GLSurfaceView.EGLContextFactory {
@@ -386,10 +386,27 @@ class GLMapView extends GLSurfaceView {
         private int height = 0;
         private double xPos = 1997500.0;
         private double yPos = 8252500.0;
-        private double zPos = 0.0001f;
+        private double zPos = 0.0001;
+        private double xScrollStart = 0.0;
+        private double yScrollStart = 0.0;
+        private GLMapView mapview;
+
+        public Renderer(GLMapView mapview) {
+            this.mapview = mapview;
+        }
 
         public void onDrawFrame(GL10 gl) {
+            long currentTime = System.currentTimeMillis();
+            
             GLMapLib.step();
+
+            if (!this.mapview.scroller.isFinished()) {
+                this.mapview.scroller.computeScrollOffset();
+                this.xPos = this.xScrollStart + this.mapview.scroller.getCurrX()/(this.zPos * this.width);
+                this.yPos = this.yScrollStart + this.mapview.scroller.getCurrY()/(this.zPos * this.height);
+                GLMapLib.move(this.xPos, this.yPos, this.zPos);
+                this.mapview.requestRender();
+            }
         }
 
         public void onSurfaceChanged(GL10 gl, int width, int height) {
@@ -397,6 +414,7 @@ class GLMapView extends GLSurfaceView {
             this.height = height;
             GLMapLib.setWindowSize(width, height);
             GLMapLib.move(this.xPos, this.yPos, this.zPos);
+            this.mapview.requestRender();
         }
 
         public void onSurfaceCreated(GL10 gl, EGLConfig config) {
@@ -408,11 +426,46 @@ class GLMapView extends GLSurfaceView {
             this.xPos = this.xPos - x/(this.zPos * this.width);
             this.yPos = this.yPos - y/(this.zPos * this.height);
             GLMapLib.move(this.xPos, this.yPos, this.zPos);
+            this.mapview.requestRender();
+        }
+
+        public void fling(float velocityX, float velocityY) {
+            this.xScrollStart = this.xPos;
+            this.yScrollStart = this.yPos;
+            this.mapview.scroller.fling(0, 0, Math.round(velocityX), Math.round(velocityY), -10*this.width, 10*this.width, -10*this.height, 10*this.height);
+            this.mapview.requestRender();
         }
 
         public void zoom(float z) {
             this.zPos = this.zPos * z;
             GLMapLib.move(this.xPos, this.yPos, this.zPos);
+            this.mapview.requestRender();
+        }
+    }
+
+    private class MapGestureDetector extends SimpleOnGestureListener {
+        private GLMapView mapview;
+
+        public MapGestureDetector(GLMapView mapview) {
+            this.mapview = mapview;
+        }
+
+        @Override
+        public boolean onDown(MotionEvent e) {
+            this.mapview.scroller.forceFinished(true);
+            return true;
+        }
+
+        @Override
+        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+            this.mapview.renderer.move(-distanceX, distanceY);
+            return true;
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            this.mapview.renderer.fling(-velocityX, velocityY);
+            return true;
         }
     }
 }
