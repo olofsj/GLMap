@@ -82,7 +82,7 @@ class GLMapView extends GLSurfaceView {
 
     public GLMapView(Context context) {
         super(context);
-        init(false, 8, 0);
+        init(false, 8, 1);
     }
 
     public GLMapView(Context context, boolean translucent, int depth, int stencil) {

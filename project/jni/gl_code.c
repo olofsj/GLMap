@@ -208,7 +208,7 @@ struct _Tile {
     GLuint lineVBO;
     GLuint polygonVBO;
     GLuint nrofLineVertices;
-    GLuint nrofPolygonTriangles;
+    GLuint nrofPolygonVertices;
     GLubyte newData;
     LineVertex *lineVertices;
     PolygonVertex *polygonVertices;
@@ -482,15 +482,31 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
 
 void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *points, PolygonVertex *polygonVertices) {
     int i, j, k;
-    int ind = 0;
+    int srcIdx = 0;
+    int tgtIdx = 0;
 
     for (i = 0; i < nrofPolygons; i++) {
-        for (j = 0; j < 3*polygonData[i].size; j++) {
-            polygonVertices[ind].x = points[ind].x;
-            polygonVertices[ind].y = points[ind].y;
-            for (k = 0; k < 4; k++) polygonVertices[ind].rgba[k] = polygonData[i].rgba[k];
-            ind++;
+        Vec startVertex = points[srcIdx];
+
+        // Build up a triangle fan manually
+        for (j = 1; j < polygonData[i].size - 1; j++) {
+            polygonVertices[tgtIdx].x = startVertex.x;
+            polygonVertices[tgtIdx].y = startVertex.y;
+            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
+            tgtIdx++;
+
+            polygonVertices[tgtIdx].x = points[srcIdx + j].x;
+            polygonVertices[tgtIdx].y = points[srcIdx + j].y;
+            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
+            tgtIdx++;
+
+            polygonVertices[tgtIdx].x = points[srcIdx + j + 1].x;
+            polygonVertices[tgtIdx].y = points[srcIdx + j + 1].y;
+            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
+            tgtIdx++;
         }
+
+        srcIdx += polygonData[i].size;
     }
 }
 
@@ -502,6 +518,8 @@ int loadMapTile(char *tilename, Tile *tile) {
     char tiledir[] = "/sdcard/GLMap/tiles";
     int nrofLines = 0;
     int nrofPolygons = 0;
+    int nrofPolygonVertices, nrofTriangleVertices;
+    int i;
 
     // FIXME: Check that file exists etc.
     snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tilename);
@@ -538,23 +556,29 @@ int loadMapTile(char *tilename, Tile *tile) {
     LOGI("Reading map polygon data from file '%s'.\n", filename);
     fp = fopen(filename, "r");
     bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
-    bytes_read = fread(&tile->nrofPolygonTriangles, sizeof(int), 1, fp);
-    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, tile->nrofPolygonTriangles);
+    bytes_read = fread(&nrofPolygonVertices, sizeof(int), 1, fp);
+    LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, nrofPolygonVertices);
 
     PolygonDataFormat *polygonData;
     GLfloat *vertices;
     polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
-    vertices = malloc(6 * tile->nrofPolygonTriangles * sizeof(GLfloat));
+    vertices = malloc(2 * nrofPolygonVertices * sizeof(GLfloat));
     bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
-    bytes_read = fread(vertices, sizeof(GLfloat), 6 * tile->nrofPolygonTriangles, fp);
+    bytes_read = fread(vertices, sizeof(GLfloat), 2 * nrofPolygonVertices, fp);
     fclose(fp);
     LOGI("Finished reading.\n");
 
     LOGI("Parsing map polygon data.\n");
     if (tile->polygonVertices) 
         free(tile->polygonVertices);
-    tile->polygonVertices = malloc(3 * tile->nrofPolygonTriangles * sizeof(PolygonVertex));
+    nrofTriangleVertices = 0;
+    for (i = 0; i < nrofPolygons; i++) {
+        nrofTriangleVertices += 3 * (polygonData[i].size - 2);
+    }
+    tile->nrofPolygonVertices = nrofTriangleVertices;
+    tile->polygonVertices = malloc(tile->nrofPolygonVertices * sizeof(PolygonVertex));
     unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, tile->polygonVertices);
+    LOGI("Unpacked: %d polygon vertices.\n", nrofTriangleVertices);
     LOGI("Finished parsing.\n");
 
     free(polygonData);
@@ -620,7 +644,7 @@ int init() {
             tiles[i][j].lineVBO = vboIds[2*n];
             tiles[i][j].polygonVBO = vboIds[2*n+1];
             tiles[i][j].nrofLineVertices = 0;
-            tiles[i][j].nrofPolygonTriangles = 0;
+            tiles[i][j].nrofPolygonVertices = 0;
             tiles[i][j].x = -1;
             tiles[i][j].y = -1;
             tiles[i][j].newData = 0;
@@ -676,7 +700,7 @@ void renderFrame() {
 
                 // Upload polygon data to graphics core vertex buffer object
                 glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
-                glBufferData(GL_ARRAY_BUFFER, 3 * tiles[i][j].nrofPolygonTriangles * sizeof(PolygonVertex),
+                glBufferData(GL_ARRAY_BUFFER, tiles[i][j].nrofPolygonVertices * sizeof(PolygonVertex),
                         tiles[i][j].polygonVertices, GL_DYNAMIC_DRAW);
 
                 tiles[i][j].newData = 0;
@@ -706,7 +730,27 @@ void renderFrame() {
             glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
                     sizeof(PolygonVertex), BUFFER_OFFSET(8));
             glEnableVertexAttribArray(gPolygonColorHandle);
-            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonTriangles);
+
+            glClearStencil(0);
+            glEnable(GL_STENCIL_TEST);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glStencilFunc(GL_NEVER, 0, 1);
+            glStencilOp(GL_INVERT, GL_INVERT, GL_INVERT);
+   
+            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonVertices);
+
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glStencilFunc(GL_EQUAL, 1, 1);
+            glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+
+            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonVertices);
+
+            glDisable(GL_STENCIL_TEST);
+
             checkGlError("glDrawArrays polygon");
         }
     }
