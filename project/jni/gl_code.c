@@ -731,19 +731,20 @@ void renderFrame() {
                     sizeof(PolygonVertex), BUFFER_OFFSET(8));
             glEnableVertexAttribArray(gPolygonColorHandle);
 
-            glClearStencil(0);
             glEnable(GL_STENCIL_TEST);
+            glClearStencil(0);
+            glClear(GL_STENCIL_BUFFER_BIT);
             glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            glDisable(GL_DEPTH_TEST);
             glDepthMask(GL_FALSE);
+
             glStencilFunc(GL_NEVER, 0, 1);
             glStencilOp(GL_INVERT, GL_INVERT, GL_INVERT);
    
             glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonVertices);
 
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glEnable(GL_DEPTH_TEST);
             glDepthMask(GL_TRUE);
+
             glStencilFunc(GL_EQUAL, 1, 1);
             glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
 
