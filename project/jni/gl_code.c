@@ -86,15 +86,15 @@ static const char gPolygonVertexShader[] =
     "uniform vec4 u_center;\n"
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
+    "uniform vec4 u_color;\n"
     "attribute vec4 a_position;\n"
-    "attribute vec4 a_color;\n"
     "varying vec4 v_color;\n"
     "void main() {\n"
     "  vec4 a = a_position; \n"
     "  a.x = scaleX*(a.x - u_center.x);\n"
     "  a.y = scaleY*(a.y - u_center.y);\n"
     "  a.z = 1.0;\n"
-    "  v_color = a_color;\n"
+    "  v_color = u_color;\n"
     "  gl_Position = a;\n"
     "}\n";
 
@@ -177,6 +177,7 @@ typedef struct _Tile Tile;
 typedef struct _Vec Vec;
 typedef struct _LineVertex LineVertex;
 typedef struct _LineDataFormat LineDataFormat;
+typedef struct _PolygonLayer PolygonLayer;
 typedef struct _PolygonVertex PolygonVertex;
 typedef struct _PolygonDataFormat PolygonDataFormat;
 
@@ -208,10 +209,17 @@ struct _Tile {
     GLuint lineVBO;
     GLuint polygonVBO;
     GLuint nrofLineVertices;
+    GLuint nrofPolygonLayers;
     GLuint nrofPolygonVertices;
     GLubyte newData;
+    PolygonLayer *polygonLayers;
     LineVertex *lineVertices;
     PolygonVertex *polygonVertices;
+};
+struct _PolygonLayer {
+    GLuint startVertex;
+    GLuint nrofVertices;
+    GLubyte rgba[4];
 };
 
 struct _Vec {
@@ -240,7 +248,6 @@ struct _LineDataFormat {
 struct _PolygonVertex {
     GLfloat x;
     GLfloat y;
-    GLubyte rgba[4];
 };
 struct _PolygonDataFormat {
     int size;
@@ -485,26 +492,24 @@ void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *point
     int srcIdx = 0;
     int tgtIdx = 0;
 
+    Vec origo = points[srcIdx];
+
     for (i = 0; i < nrofPolygons; i++) {
+        polygonVertices[tgtIdx].x = origo.x;
+        polygonVertices[tgtIdx].y = origo.y;
+        tgtIdx++;
+
         Vec startVertex = points[srcIdx];
 
-        // Build up a triangle fan manually
-        for (j = 1; j < polygonData[i].size - 1; j++) {
-            polygonVertices[tgtIdx].x = startVertex.x;
-            polygonVertices[tgtIdx].y = startVertex.y;
-            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
-            tgtIdx++;
-
+        for (j = 0; j < polygonData[i].size; j++) {
             polygonVertices[tgtIdx].x = points[srcIdx + j].x;
             polygonVertices[tgtIdx].y = points[srcIdx + j].y;
-            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
-            tgtIdx++;
-
-            polygonVertices[tgtIdx].x = points[srcIdx + j + 1].x;
-            polygonVertices[tgtIdx].y = points[srcIdx + j + 1].y;
-            for (k = 0; k < 4; k++) polygonVertices[tgtIdx].rgba[k] = polygonData[i].rgba[k];
             tgtIdx++;
         }
+
+        polygonVertices[tgtIdx].x = startVertex.x;
+        polygonVertices[tgtIdx].y = startVertex.y;
+        tgtIdx++;
 
         srcIdx += polygonData[i].size;
     }
@@ -519,7 +524,7 @@ int loadMapTile(char *tilename, Tile *tile) {
     int nrofLines = 0;
     int nrofPolygons = 0;
     int nrofPolygonVertices, nrofTriangleVertices;
-    int i;
+    int i, k;
 
     // FIXME: Check that file exists etc.
     snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tilename);
@@ -571,12 +576,17 @@ int loadMapTile(char *tilename, Tile *tile) {
     LOGI("Parsing map polygon data.\n");
     if (tile->polygonVertices) 
         free(tile->polygonVertices);
-    nrofTriangleVertices = 0;
-    for (i = 0; i < nrofPolygons; i++) {
-        nrofTriangleVertices += 3 * (polygonData[i].size - 2);
-    }
+    nrofTriangleVertices = nrofPolygonVertices + 2*nrofPolygons;
+
     tile->nrofPolygonVertices = nrofTriangleVertices;
-    tile->polygonVertices = malloc(tile->nrofPolygonVertices * sizeof(PolygonVertex));
+
+    tile->nrofPolygonLayers = 1;
+    tile->polygonLayers = malloc(tile->nrofPolygonLayers * sizeof(PolygonLayer));
+    tile->polygonLayers[0].startVertex = 0;
+    tile->polygonLayers[0].nrofVertices = nrofTriangleVertices;
+    for (k = 0; k < 4; k++) tile->polygonLayers[0].rgba[k] = polygonData[0].rgba[k];
+
+    tile->polygonVertices = malloc(nrofTriangleVertices * sizeof(PolygonVertex));
     unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, tile->polygonVertices);
     LOGI("Unpacked: %d polygon vertices.\n", nrofTriangleVertices);
     LOGI("Finished parsing.\n");
@@ -628,8 +638,8 @@ int init() {
     gPolygonvPositionHandle = glGetAttribLocation(gPolygonProgram, "a_position");
     checkGlError("glGetAttribLocation");
 
-    gPolygonColorHandle = glGetAttribLocation(gPolygonProgram, "a_color");
-    checkGlError("glGetAttribLocation");
+    gPolygonColorHandle = glGetUniformLocation(gPolygonProgram, "u_color");
+    checkGlError("glGetUniformLocation");
 
     // Set up vertex buffer objects 
     GLuint vboIds[2*NROF_TILES];
@@ -645,9 +655,11 @@ int init() {
             tiles[i][j].polygonVBO = vboIds[2*n+1];
             tiles[i][j].nrofLineVertices = 0;
             tiles[i][j].nrofPolygonVertices = 0;
+            tiles[i][j].nrofPolygonLayers = 0;
             tiles[i][j].x = -1;
             tiles[i][j].y = -1;
             tiles[i][j].newData = 0;
+            tiles[i][j].polygonLayers = NULL;
             tiles[i][j].lineVertices = NULL;
             tiles[i][j].polygonVertices = NULL;
         }
@@ -682,7 +694,7 @@ int setWindowSize(int w, int h) {
 
 void renderFrame() {
     double x, y, z;
-    int i, j;
+    int i, j, l;
     char tilename[256];
 
     x = xPos;
@@ -722,37 +734,42 @@ void renderFrame() {
 
     for (i = 0; i < NROF_TILES_X; i++) {
         for (j = 0; j < NROF_TILES_Y; j++) {
+            for (l = 0; l < tiles[i][j].nrofPolygonLayers; l++) {
+                PolygonLayer *layer = &tiles[i][j].polygonLayers[l];
 
-            glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
-            glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
-                    sizeof(PolygonVertex), BUFFER_OFFSET(0));
-            glEnableVertexAttribArray(gPolygonvPositionHandle);
-            glVertexAttribPointer(gPolygonColorHandle, 4, GL_UNSIGNED_BYTE, GL_TRUE,
-                    sizeof(PolygonVertex), BUFFER_OFFSET(8));
-            glEnableVertexAttribArray(gPolygonColorHandle);
+                glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
+                glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
+                        0, BUFFER_OFFSET(0));
+                glEnableVertexAttribArray(gPolygonvPositionHandle);
+                glUniform4f(gPolygonColorHandle,
+                        (GLfloat)(layer->rgba[0])/255.0,
+                        (GLfloat)(layer->rgba[1])/255.0,
+                        (GLfloat)(layer->rgba[2])/255.0,
+                        (GLfloat)(layer->rgba[3])/255.0);
 
-            glEnable(GL_STENCIL_TEST);
-            glClearStencil(0);
-            glClear(GL_STENCIL_BUFFER_BIT);
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            glDepthMask(GL_FALSE);
+                glEnable(GL_STENCIL_TEST);
+                glClearStencil(0);
+                glClear(GL_STENCIL_BUFFER_BIT);
+                glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+                glDepthMask(GL_FALSE);
 
-            glStencilFunc(GL_NEVER, 0, 1);
-            glStencilOp(GL_INVERT, GL_INVERT, GL_INVERT);
-   
-            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonVertices);
+                glStencilFunc(GL_NEVER, 0, 1);
+                glStencilOp(GL_INVERT, GL_INVERT, GL_INVERT);
 
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glDepthMask(GL_TRUE);
+                glDrawArrays(GL_TRIANGLE_FAN, layer->startVertex, layer->nrofVertices);
 
-            glStencilFunc(GL_EQUAL, 1, 1);
-            glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glDepthMask(GL_TRUE);
 
-            glDrawArrays(GL_TRIANGLES, 0, 3*tiles[i][j].nrofPolygonVertices);
+                glStencilFunc(GL_EQUAL, 1, 1);
+                glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
 
-            glDisable(GL_STENCIL_TEST);
+                glDrawArrays(GL_TRIANGLE_FAN, layer->startVertex, layer->nrofVertices);
 
-            checkGlError("glDrawArrays polygon");
+                glDisable(GL_STENCIL_TEST);
+
+                checkGlError("glDrawArrays polygon");
+            }
         }
     }
 
