@@ -86,19 +86,31 @@ static const char gPolygonVertexShader[] =
     "uniform vec4 u_center;\n"
     "uniform float scaleX;\n"
     "uniform float scaleY;\n"
-    "uniform vec4 u_color;\n"
     "attribute vec4 a_position;\n"
-    "varying vec4 v_color;\n"
     "void main() {\n"
     "  vec4 a = a_position; \n"
     "  a.x = scaleX*(a.x - u_center.x);\n"
     "  a.y = scaleY*(a.y - u_center.y);\n"
     "  a.z = 1.0;\n"
-    "  v_color = u_color;\n"
     "  gl_Position = a;\n"
     "}\n";
 
 static const char gPolygonFragmentShader[] = 
+    "precision mediump float;\n"
+    "void main() {\n"
+    "  gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "}\n";
+
+static const char gPolygonFillVertexShader[] = 
+    "uniform vec4 u_color;\n"
+    "attribute vec4 a_position;\n"
+    "varying vec4 v_color;\n"
+    "void main() {\n"
+    "  v_color = u_color;\n"
+    "  gl_Position = a_position;\n"
+    "}\n";
+
+static const char gPolygonFillFragmentShader[] = 
     "precision mediump float;\n"
     "varying vec4 v_color;\n"
     "void main() {\n"
@@ -192,16 +204,24 @@ GLuint gLineScaleXHandle;
 GLuint gLineScaleYHandle;
 GLuint gPolygonProgram;
 GLuint gPolygonvPositionHandle;
-GLuint gPolygonColorHandle;
 GLuint gPolygoncPositionHandle;
 GLuint gPolygonScaleXHandle;
 GLuint gPolygonScaleYHandle;
+GLuint gPolygonFillProgram;
+GLuint gPolygonFillvPositionHandle;
+GLuint gPolygonFillColorHandle;
 double xPos = 59.4;
 double yPos = 17.87;
 double zPos = 10.0;
 double tile_size = 5000.0;
 int width, height;
 Tile **tiles;
+static const GLfloat fullscreenCoords[] = {
+    -1.0, 1.0, 
+    1.0, 1.0, 
+    -1.0, -1.0, 
+    1.0, -1.0
+};
 
 struct _Tile {
     int x;
@@ -670,13 +690,8 @@ int init() {
     gLineScaleYHandle = glGetUniformLocation(gLineProgram, "scaleY");
     gLineHeightOffsetHandle = glGetUniformLocation(gLineProgram, "height_offset");
     gLineWidthHandle = glGetUniformLocation(gLineProgram, "width");
-    
     gLinevPositionHandle = glGetAttribLocation(gLineProgram, "a_position");
-    checkGlError("glGetAttribLocation");
-
     gLinetexPositionHandle = glGetAttribLocation(gLineProgram, "a_st");
-    checkGlError("glGetAttribLocation");
-
     gLineColorHandle = glGetAttribLocation(gLineProgram, "a_color");
     checkGlError("glGetAttribLocation");
 
@@ -689,11 +704,17 @@ int init() {
     gPolygoncPositionHandle = glGetUniformLocation(gPolygonProgram, "u_center");
     gPolygonScaleXHandle = glGetUniformLocation(gPolygonProgram, "scaleX");
     gPolygonScaleYHandle = glGetUniformLocation(gPolygonProgram, "scaleY");
-    
     gPolygonvPositionHandle = glGetAttribLocation(gPolygonProgram, "a_position");
-    checkGlError("glGetAttribLocation");
+    checkGlError("glGetUniformLocation");
 
-    gPolygonColorHandle = glGetUniformLocation(gPolygonProgram, "u_color");
+    // Set up the program for filling polygons
+    gPolygonFillProgram = createProgram(gPolygonFillVertexShader, gPolygonFillFragmentShader);
+    if (!gPolygonFillProgram) {
+        LOGE("Could not create program.");
+        return 1;
+    }
+    gPolygonFillvPositionHandle = glGetAttribLocation(gPolygonFillProgram, "a_position");
+    gPolygonFillColorHandle = glGetUniformLocation(gPolygonFillProgram, "u_color");
     checkGlError("glGetUniformLocation");
 
     // Set up vertex buffer objects 
@@ -780,27 +801,24 @@ void renderFrame() {
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
     // Draw polygons
-    glUseProgram(gPolygonProgram);
-    checkGlError("glUseProgram");
-
-    glUniform4f(gPolygoncPositionHandle, x, y, 0.0, 0.0);
-    glUniform1f(gPolygonScaleXHandle, z*(float)(height)/(float)(width));
-    glUniform1f(gPolygonScaleYHandle, z);
-
     for (i = 0; i < NROF_TILES_X; i++) {
         for (j = 0; j < NROF_TILES_Y; j++) {
             for (l = 0; l < tiles[i][j].nrofPolygonLayers; l++) {
                 PolygonLayer *layer = &tiles[i][j].polygonLayers[l];
 
+                // Draw into stencil buffer to find covered areas
+                // This uses the method described here:
+                // http://www.glprogramming.com/red/chapter14.html#name13
+
+                glUseProgram(gPolygonProgram);
+                glUniform4f(gPolygoncPositionHandle, x, y, 0.0, 0.0);
+                glUniform1f(gPolygonScaleXHandle, z*(float)(height)/(float)(width));
+                glUniform1f(gPolygonScaleYHandle, z);
+
                 glBindBuffer(GL_ARRAY_BUFFER, tiles[i][j].polygonVBO);
                 glVertexAttribPointer(gPolygonvPositionHandle, 2, GL_FLOAT, GL_FALSE,
                         0, BUFFER_OFFSET(0));
                 glEnableVertexAttribArray(gPolygonvPositionHandle);
-                glUniform4f(gPolygonColorHandle,
-                        (GLfloat)(layer->rgba[0])/255.0,
-                        (GLfloat)(layer->rgba[1])/255.0,
-                        (GLfloat)(layer->rgba[2])/255.0,
-                        (GLfloat)(layer->rgba[3])/255.0);
 
                 glEnable(GL_STENCIL_TEST);
                 glClearStencil(0);
@@ -813,17 +831,28 @@ void renderFrame() {
 
                 glDrawArrays(GL_TRIANGLE_FAN, layer->startVertex, layer->nrofVertices);
 
+                // Draw with the color to fill them
+
+                glUseProgram(gPolygonFillProgram);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                glUniform4f(gPolygonFillColorHandle,
+                        (GLfloat)(layer->rgba[0])/255.0,
+                        (GLfloat)(layer->rgba[1])/255.0,
+                        (GLfloat)(layer->rgba[2])/255.0,
+                        (GLfloat)(layer->rgba[3])/255.0);
+                glVertexAttribPointer(gPolygonFillvPositionHandle, 2, GL_FLOAT, GL_FALSE, 
+                        0, fullscreenCoords);
+                glEnableVertexAttribArray(gPolygonFillvPositionHandle);
+
                 glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
                 glDepthMask(GL_TRUE);
 
                 glStencilFunc(GL_EQUAL, 1, 1);
                 glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
 
-                glDrawArrays(GL_TRIANGLE_FAN, layer->startVertex, layer->nrofVertices);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
                 glDisable(GL_STENCIL_TEST);
-
-                checkGlError("glDrawArrays polygon");
             }
         }
     }
