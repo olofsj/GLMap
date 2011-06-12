@@ -487,32 +487,98 @@ void unpackLinesToPolygons(int nrofLines, LineDataFormat *lineData, Vec *points,
     *nrofLineVertices = ind;
 }
 
-void unpackPolygons(int nrofPolygons, PolygonDataFormat *polygonData, Vec *points, PolygonVertex *polygonVertices) {
-    int i, j, k;
+int colorIsEqual(GLubyte rgba1[4], GLubyte rgba2[4]) {
+    int k;
+
+    for (k = 0; k < 4; k++) {
+        if (rgba1[k] != rgba2[k]) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+void unpackPolygons(Tile *tile, int nrofPolygons, PolygonDataFormat *polygonData, Vec *points) {
+    int i, j, k, l;
     int srcIdx = 0;
     int tgtIdx = 0;
 
-    Vec origo = points[srcIdx];
+    tile->nrofPolygonLayers = 0;
+    tile->polygonLayers = NULL;
 
+    // Scan through the polygons and set up the needed layers
     for (i = 0; i < nrofPolygons; i++) {
-        polygonVertices[tgtIdx].x = origo.x;
-        polygonVertices[tgtIdx].y = origo.y;
-        tgtIdx++;
+        int found = 0;
+        int thisPolygonVertices = polygonData[i].size + 2; 
 
-        Vec startVertex = points[srcIdx];
-
-        for (j = 0; j < polygonData[i].size; j++) {
-            polygonVertices[tgtIdx].x = points[srcIdx + j].x;
-            polygonVertices[tgtIdx].y = points[srcIdx + j].y;
-            tgtIdx++;
+        for (l = 0; l < tile->nrofPolygonLayers; l++) {
+            if (colorIsEqual(tile->polygonLayers[l].rgba, polygonData[i].rgba)) {
+                tile->polygonLayers[l].nrofVertices += thisPolygonVertices;
+                found = 1;
+                break;
+            }
         }
 
-        polygonVertices[tgtIdx].x = startVertex.x;
-        polygonVertices[tgtIdx].y = startVertex.y;
-        tgtIdx++;
+        if (!found) {
+            tile->nrofPolygonLayers++;
+            tile->polygonLayers = realloc(tile->polygonLayers, tile->nrofPolygonLayers * sizeof(PolygonLayer));
+            l = tile->nrofPolygonLayers-1;
+            tile->polygonLayers[l].nrofVertices = thisPolygonVertices;
+            for (k = 0; k < 4; k++) tile->polygonLayers[l].rgba[k] = polygonData[i].rgba[k];
+        }
 
-        srcIdx += polygonData[i].size;
+        tile->nrofPolygonVertices += thisPolygonVertices;
     }
+
+    LOGI("Unpacked: %d layers.\n", tile->nrofPolygonLayers);
+    for (l = 0; l < tile->nrofPolygonLayers; l++) {
+        LOGI("Unpacked: Layer %d has %d vertices.\n", l, tile->polygonLayers[l].nrofVertices);
+    }
+
+    // Set up start indices
+    tile->polygonLayers[0].startVertex = 0;
+    for (l = 1; l < tile->nrofPolygonLayers; l++) {
+        tile->polygonLayers[l].startVertex = tile->polygonLayers[l-1].startVertex 
+            + tile->polygonLayers[l-1].nrofVertices;
+    }
+
+    tile->polygonVertices = malloc(tile->nrofPolygonVertices * sizeof(PolygonVertex));
+
+
+    // Load all the polygon vertices into the correct layer
+    Vec origo = points[0];
+
+    for (l = 0; l < tile->nrofPolygonLayers; l++) {
+        srcIdx = 0;
+
+        for (i = 0; i < nrofPolygons; i++) {
+            if (colorIsEqual(tile->polygonLayers[l].rgba, polygonData[i].rgba)) {
+
+                tile->polygonVertices[tgtIdx].x = origo.x;
+                tile->polygonVertices[tgtIdx].y = origo.y;
+                tgtIdx++;
+
+                Vec startVertex = points[srcIdx];
+
+                for (j = 0; j < polygonData[i].size; j++) {
+                    tile->polygonVertices[tgtIdx].x = points[srcIdx + j].x;
+                    tile->polygonVertices[tgtIdx].y = points[srcIdx + j].y;
+                    tgtIdx++;
+                }
+
+                tile->polygonVertices[tgtIdx].x = startVertex.x;
+                tile->polygonVertices[tgtIdx].y = startVertex.y;
+                tgtIdx++;
+
+            }
+
+            srcIdx += polygonData[i].size;
+        }
+
+    }
+
+    LOGI("Unpacked: %d polygon vertices.\n", tile->nrofPolygonVertices);
 }
 
 int loadMapTile(char *tilename, Tile *tile) {
@@ -523,7 +589,7 @@ int loadMapTile(char *tilename, Tile *tile) {
     char tiledir[] = "/sdcard/GLMap/tiles";
     int nrofLines = 0;
     int nrofPolygons = 0;
-    int nrofPolygonVertices, nrofTriangleVertices;
+    int nrofPolygonVertices = 0;
     int i, k;
 
     // FIXME: Check that file exists etc.
@@ -576,19 +642,8 @@ int loadMapTile(char *tilename, Tile *tile) {
     LOGI("Parsing map polygon data.\n");
     if (tile->polygonVertices) 
         free(tile->polygonVertices);
-    nrofTriangleVertices = nrofPolygonVertices + 2*nrofPolygons;
 
-    tile->nrofPolygonVertices = nrofTriangleVertices;
-
-    tile->nrofPolygonLayers = 1;
-    tile->polygonLayers = malloc(tile->nrofPolygonLayers * sizeof(PolygonLayer));
-    tile->polygonLayers[0].startVertex = 0;
-    tile->polygonLayers[0].nrofVertices = nrofTriangleVertices;
-    for (k = 0; k < 4; k++) tile->polygonLayers[0].rgba[k] = polygonData[0].rgba[k];
-
-    tile->polygonVertices = malloc(nrofTriangleVertices * sizeof(PolygonVertex));
-    unpackPolygons(nrofPolygons, polygonData, (Vec *)vertices, tile->polygonVertices);
-    LOGI("Unpacked: %d polygon vertices.\n", nrofTriangleVertices);
+    unpackPolygons(tile, nrofPolygons, polygonData, (Vec *)vertices);
     LOGI("Finished parsing.\n");
 
     free(polygonData);
