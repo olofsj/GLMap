@@ -1,11 +1,12 @@
 project/libs
 project/gen
 project/bin
+project/obj
 *.swp
 *~
 *.o
 *.pyc
-*.swp
+*.swo
 *~
 Makefile
 Makefile.in
