@@ -22,7 +22,6 @@ LOCAL_CFLAGS    := -Werror
 
 LOCAL_SRC_FILES := \
 	gl_code.c \
-	gl_aa_tex.c \
 
 LOCAL_LDLIBS    := -llog -lGLESv2
 
