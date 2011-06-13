@@ -224,11 +224,18 @@ class GLMapView extends GLSurfaceView {
             egl.eglChooseConfig(display, s_configAttribs2, configs, numConfigs, num_config);
 
             if (DEBUG) {
-                 printConfigs(egl, display, configs);
+                printConfigs(egl, display, configs);
             }
             /* Now return the "best" one
              */
-            return chooseConfig(egl, display, configs);
+            EGLConfig chosenConfig = chooseConfig(egl, display, configs);
+
+            if (DEBUG) {
+                Log.w(TAG, "Chosen configuration:");
+                printConfigs(egl, display, new EGLConfig[] { chosenConfig });
+            }
+
+            return chosenConfig;
         }
 
         public EGLConfig chooseConfig(EGL10 egl, EGLDisplay display,
