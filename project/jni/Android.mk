@@ -21,7 +21,10 @@ LOCAL_MODULE    := libglmap
 LOCAL_CFLAGS    := -Werror
 
 LOCAL_SRC_FILES := \
-	gl_code.c \
+	glmaprenderer.c \
+	glmaploader.c \
+	glmapjni.c \
+	glhelper.c \
 
 LOCAL_LDLIBS    := -llog -lGLESv2
 
