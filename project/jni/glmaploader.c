@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 
 #include "glmaploader.h"
 #include "glhelper.h"
@@ -333,30 +336,52 @@ void unpackPolygons(Tile *tile, int nrofPolygons, PolygonDataFormat *polygonData
 int loadMapTile(char *tilename, Tile *tile) {
     // Load map data from files
     FILE *fp;
+    int fd;
+    int filesize;
     int bytes_read;
+    void *filecontent;
     char filename[4096];
     char tiledir[] = "/sdcard/GLMap/tiles";
     int nrofLines = 0;
     int nrofPolygons = 0;
     int nrofPolygonVertices = 0;
     int i, k;
+    struct stat st;
 
-    // FIXME: Check that file exists etc.
+    // Read in line data
     snprintf(filename, sizeof(filename)-1, "%s/%s.line", tiledir, tilename);
     LOGI("Reading map line data from file '%s'.\n", filename);
-    fp = fopen(filename, "r");
-    int nrofLinePoints;
-    bytes_read = fread(&nrofLines, sizeof(int), 1, fp);
-    bytes_read = fread(&nrofLinePoints, sizeof(int), 1, fp);
-    LOGI("Found: %d lines, %d vertices.\n", nrofLines, nrofLinePoints);
 
+    /* Open file descriptor and stat the file to get size */
+    fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        // TODO Error, do something here
+    }
+    if (fstat(fd, &st) < 0)
+    {
+        close(fd);
+        // TODO Error, handle
+    }
+    filesize = st.st_size;
+
+    /* mmap file contents */
+    filecontent = mmap(NULL, filesize, PROT_READ, MAP_SHARED, fd, 0);
+    if ((filecontent == MAP_FAILED) || (filecontent == NULL))
+    {
+        close(fd);
+        // TODO Error handle
+    }
+
+    int nrofLinePoints;
     LineDataFormat *lineData;
     GLfloat *linePoints;
-    lineData = malloc(nrofLines * sizeof(LineDataFormat));
-    linePoints = malloc(2 * nrofLinePoints * sizeof(GLfloat));
-    bytes_read = fread(lineData, sizeof(LineDataFormat), nrofLines, fp);
-    bytes_read = fread(linePoints, sizeof(GLfloat), 2*nrofLinePoints, fp);
-    fclose(fp);
+    nrofLines = *(int *)(filecontent);
+    nrofLinePoints = *(int *)(filecontent + sizeof(int));
+    LOGI("Found: %d lines, %d vertices.\n", nrofLines, nrofLinePoints);
+
+    lineData = (filecontent + 2*sizeof(int));
+    linePoints = (filecontent + 2*sizeof(int) + nrofLines * sizeof(LineDataFormat));
+
     LOGI("Finished reading.\n");
 
     // For each line, we get at most twice the number of points, plus one extra node in the beginning and end
@@ -368,24 +393,40 @@ int loadMapTile(char *tilename, Tile *tile) {
     unpackLinesToPolygons(nrofLines, lineData, (Vec *)linePoints, tile->lineVertices, &tile->nrofLineVertices);
     LOGI("Finished parsing.\n");
 
-    free(lineData);
-    free(linePoints);
+    munmap(filecontent, filesize);
+    close(fd);
 
     // Read in polygon data
     snprintf(filename, sizeof(filename)-1, "%s/%s.poly", tiledir, tilename);
     LOGI("Reading map polygon data from file '%s'.\n", filename);
-    fp = fopen(filename, "r");
-    bytes_read = fread(&nrofPolygons, sizeof(int), 1, fp);
-    bytes_read = fread(&nrofPolygonVertices, sizeof(int), 1, fp);
+
+    /* Open file descriptor and stat the file to get size */
+    fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        // TODO Error, do something here
+    }
+    if (fstat(fd, &st) < 0)
+    {
+        close(fd);
+        // TODO Error, handle
+    }
+    filesize = st.st_size;
+
+    /* mmap file contents */
+    filecontent = mmap(NULL, filesize, PROT_READ, MAP_SHARED, fd, 0);
+    if ((filecontent == MAP_FAILED) || (filecontent == NULL))
+    {
+        close(fd);
+        // TODO Error handle
+    }
+    nrofPolygons = *(int *)(filecontent);
+    nrofPolygonVertices = *(int *)(filecontent + sizeof(int));
     LOGI("Found: %d polygons, %d vertices.\n", nrofPolygons, nrofPolygonVertices);
 
     PolygonDataFormat *polygonData;
     GLfloat *vertices;
-    polygonData = malloc(nrofPolygons * sizeof(PolygonDataFormat));
-    vertices = malloc(2 * nrofPolygonVertices * sizeof(GLfloat));
-    bytes_read = fread(polygonData, sizeof(PolygonDataFormat), nrofPolygons, fp);
-    bytes_read = fread(vertices, sizeof(GLfloat), 2 * nrofPolygonVertices, fp);
-    fclose(fp);
+    polygonData = (filecontent + 2*sizeof(int));
+    vertices = (filecontent + 2*sizeof(int) + nrofPolygons*sizeof(PolygonDataFormat));
     LOGI("Finished reading.\n");
 
     LOGI("Parsing map polygon data.\n");
@@ -395,8 +436,8 @@ int loadMapTile(char *tilename, Tile *tile) {
     unpackPolygons(tile, nrofPolygons, polygonData, (Vec *)vertices);
     LOGI("Finished parsing.\n");
 
-    free(polygonData);
-    free(vertices);
+    munmap(filecontent, filesize);
+    close(fd);
 
     return 0;
 }
